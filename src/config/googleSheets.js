@@ -4,18 +4,18 @@ require('./env'); // Ensure environment is loaded and service account JSON is po
 let auth;
 
 if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set');
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not defined in environment variables');
 }
 
 try {
-    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
 
     auth = new google.auth.GoogleAuth({
-        credentials,
+        credentials: serviceAccount,
         scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
 
-    console.log('[Google Sheets] Auth initialized via GOOGLE_SERVICE_ACCOUNT_JSON');
+    console.log('[Startup] Sheets initialized');
 } catch (error) {
     console.error('[Google Sheets] Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON:', error);
     throw error;

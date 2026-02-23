@@ -1,9 +1,10 @@
 const app = require('./app');
-const { env, validateEnv } = require('./config/env');
+const { validateEnv } = require('./config/env');
 const { processPayments } = require('./services/paymentProcessor');
 
 // Validate environment variables before starting
 validateEnv();
+console.log('[Startup] Environment loaded');
 
 // To use ngrok:
 // 1. Run backend normally (npm start)
@@ -13,8 +14,10 @@ validateEnv();
 //    BASE_URL=https://your-ngrok-url.ngrok-free.app
 // 5. Restart server
 
-const server = app.listen(env.port, '0.0.0.0', () => {
-    console.log(`Server is running on port ${env.port}`);
+const PORT = process.env.PORT || 3000;
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log('[Startup] Server started successfully');
     console.log('Running with BASE_URL:', process.env.BASE_URL);
 });
 

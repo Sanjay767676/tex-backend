@@ -1,22 +1,8 @@
 const dotenv = require('dotenv');
 const path = require('path');
-const fs = require('fs');
 
 // Load environment variables from .env
 dotenv.config({ path: path.join(__dirname, '../../.env') });
-
-// Immediate loading of service account JSON from file if needed
-if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON && process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
-    try {
-        const keyPath = path.join(__dirname, '../../', process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-        if (fs.existsSync(keyPath)) {
-            process.env.GOOGLE_SERVICE_ACCOUNT_JSON = fs.readFileSync(keyPath, 'utf8');
-            console.log('[Env Config] Loaded GOOGLE_SERVICE_ACCOUNT_JSON from file');
-        }
-    } catch (err) {
-        console.error('[Env Config] Failed to load service account file:', err.message);
-    }
-}
 
 const required = [
     'CS_EVENTS_SHEET_ID',
