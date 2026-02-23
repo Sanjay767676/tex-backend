@@ -1,0 +1,125 @@
+﻿[dotenv@17.3.1] injecting env (13) from .env -- tip: ΓÜÖ∩╕Å  suppress all logs with { quiet: true }
+[Env Config] Loaded GOOGLE_SERVICE_ACCOUNT_JSON from file
+[Google Sheets] Auth initialized via GOOGLE_SERVICE_ACCOUNT_JSON
+Server is running on port 3000
+Running with BASE_URL: http://localhost:3000
+[SMTP] Resolved smtp.gmail.com ΓåÆ 192.178.211.109
+[SMTP] CS Ready (port 465, IPv4)
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[SMTP] NCS Ready (port 465, IPv4)
+[Sheets Service] Scanning tabs in 1Bf0B1jzSMIE0IGz8BWBvBLHH_gQUz_04hhfxJ0-d2os...
+[Payment Processor] Found 0 pending payments in CS Events
+[Sheets Service] Scanning tabs in 1I6jMb80O026WuN_FDJBVbRjgbZHIAckiTUK6bNVlcYg...
+[Payment Processor] Found 0 pending payments in CS Workshop
+[Sheets Service] Scanning tabs in 1O5uno5yz98JU5BeOrD6wm11gYSfRTzWNfnahz_T_pBM...
+[Payment Processor] Found 0 pending payments in CS Hackathon
+[Sheets Service] Scanning tabs in 1XXk9pDJ2SkHWkQFodo9qLcjGDDm68QNYLRJT3Cgtmsc...
+[Payment Processor] Found 0 pending payments in NCS Events
+node : [Sheets Service] 
+ΓÜá∩╕Å API Quota Exceeded 
+for 1LjH-E6EMbJHNLuWY-RSU5
+G46NPA1f0bYmEK8Vti1gPg.
+At line:1 char:1
++ node src/server.js > 
+server_log_stable.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: ([  
+  Sheets Service...0bYm   
+ EK8Vti1gPg.:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+[Payment Processor] Found 0 pending payments in NCS Workshop
+[Sheets Service] ΓÜá∩╕Å 
+API Quota Exceeded for 1YK
+GRvPK1MuKM3CZUNC45Ws854CGE
+UUwKzVRYSBaiy00.
+[Payment Processor] Found 0 pending payments in NCS Hackathon
+[Payment Processor] Completed: 0 total payments processed in 19956ms
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[Sheets Service] Scanning tabs in 1Bf0B1jzSMIE0IGz8BWBvBLHH_gQUz_04hhfxJ0-d2os...
+[Payment Processor] Found 0 pending payments in CS Events
+[Sheets Service] Scanning tabs in 1I6jMb80O026WuN_FDJBVbRjgbZHIAckiTUK6bNVlcYg...
+[Payment Processor] Found 0 pending payments in CS Workshop
+[Sheets Service] Scanning tabs in 1O5uno5yz98JU5BeOrD6wm11gYSfRTzWNfnahz_T_pBM...
+[Payment Processor] Found 0 pending payments in CS Hackathon
+[Sheets Service] Scanning tabs in 1XXk9pDJ2SkHWkQFodo9qLcjGDDm68QNYLRJT3Cgtmsc...
+[Payment Processor] Found 0 pending payments in NCS Events
+[Sheets Service] Scanning tabs in 1LjH-E6EMbJHNLuWY-RSU5G46NPA1f0bYmEK8Vti1gPg...
+[Payment Processor] Found 0 pending payments in NCS Workshop
+[Sheets Service] Scanning tabs in 1YKGRvPK1MuKM3CZUNC45Ws854CGEUUwKzVRYSBaiy00...
+[Sheets Service] Error 
+reading sheet 1YKGRvPK1MuK
+M3CZUNC45Ws854CGEUUwKzVRYS
+Baiy00: Quota exceeded 
+for quota metric 'Read 
+requests' and limit 'Read 
+requests per minute per 
+user' of service 
+'sheets.googleapis.com' 
+for consumer 'project_numb
+er:598477401863'.
+[Sheets Service] ΓÜá∩╕Å 
+API Quota Exceeded for 1YK
+GRvPK1MuKM3CZUNC45Ws854CGE
+UUwKzVRYSBaiy00.
+[Payment Processor] Found 0 pending payments in NCS Hackathon
+[Payment Processor] Completed: 0 total payments processed in 15695ms
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[Sheets Service] Scanning tabs in 1Bf0B1jzSMIE0IGz8BWBvBLHH_gQUz_04hhfxJ0-d2os...
+[Payment Processor] Found 0 pending payments in CS Events
+[Sheets Service] Scanning tabs in 1I6jMb80O026WuN_FDJBVbRjgbZHIAckiTUK6bNVlcYg...
+[Payment Processor] Found 0 pending payments in CS Workshop
+[Sheets Service] Scanning tabs in 1O5uno5yz98JU5BeOrD6wm11gYSfRTzWNfnahz_T_pBM...
+[Payment Processor] Found 0 pending payments in CS Hackathon
+[Sheets Service] Scanning tabs in 1XXk9pDJ2SkHWkQFodo9qLcjGDDm68QNYLRJT3Cgtmsc...
+[Payment Processor] Found 0 pending payments in NCS Events
+[Sheets Service] Scanning tabs in 1LjH-E6EMbJHNLuWY-RSU5G46NPA1f0bYmEK8Vti1gPg...
+[Payment Processor] Found 0 pending payments in NCS Workshop
+[Sheets Service] ΓÜá∩╕Å 
+API Quota Exceeded for 1YK
+GRvPK1MuKM3CZUNC45Ws854CGE
+UUwKzVRYSBaiy00.
+[Payment Processor] Found 0 pending payments in NCS Hackathon
+[Payment Processor] Completed: 0 total payments processed in 16397ms
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[Sheets Service] Scanning tabs in 1Bf0B1jzSMIE0IGz8BWBvBLHH_gQUz_04hhfxJ0-d2os...
+[Payment Processor] Found 0 pending payments in CS Events
+[Sheets Service] Scanning tabs in 1I6jMb80O026WuN_FDJBVbRjgbZHIAckiTUK6bNVlcYg...
+[Payment Processor] Found 0 pending payments in CS Workshop
+[Sheets Service] Scanning tabs in 1O5uno5yz98JU5BeOrD6wm11gYSfRTzWNfnahz_T_pBM...
+[Payment Processor] Found 0 pending payments in CS Hackathon
+[Sheets Service] Scanning tabs in 1XXk9pDJ2SkHWkQFodo9qLcjGDDm68QNYLRJT3Cgtmsc...
+[Payment Processor] Found 0 pending payments in NCS Events
+[Sheets Service] Scanning tabs in 1LjH-E6EMbJHNLuWY-RSU5G46NPA1f0bYmEK8Vti1gPg...
+[Payment Processor] Found 0 pending payments in NCS Workshop
+[Sheets Service] ΓÜá∩╕Å 
+API Quota Exceeded for 1YK
+GRvPK1MuKM3CZUNC45Ws854CGE
+UUwKzVRYSBaiy00.
+[Payment Processor] Found 0 pending payments in NCS Hackathon
+[Payment Processor] Completed: 0 total payments processed in 14655ms
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[Sheets Service] Scanning tabs in 1Bf0B1jzSMIE0IGz8BWBvBLHH_gQUz_04hhfxJ0-d2os...
+[Payment Processor] Found 0 pending payments in CS Events
+[Sheets Service] Scanning tabs in 1I6jMb80O026WuN_FDJBVbRjgbZHIAckiTUK6bNVlcYg...
+[Payment Processor] Found 0 pending payments in CS Workshop
+[Sheets Service] Scanning tabs in 1O5uno5yz98JU5BeOrD6wm11gYSfRTzWNfnahz_T_pBM...
+[Payment Processor] Found 0 pending payments in CS Hackathon
+[Sheets Service] Scanning tabs in 1XXk9pDJ2SkHWkQFodo9qLcjGDDm68QNYLRJT3Cgtmsc...
+[Payment Processor] Found 0 pending payments in NCS Events
+[Sheets Service] Scanning tabs in 1LjH-E6EMbJHNLuWY-RSU5G46NPA1f0bYmEK8Vti1gPg...
+[Payment Processor] Found 0 pending payments in NCS Workshop
+[Sheets Service] ΓÜá∩╕Å 
+API Quota Exceeded for 1YK
+GRvPK1MuKM3CZUNC45Ws854CGE
+UUwKzVRYSBaiy00.
+[Payment Processor] Found 0 pending payments in NCS Hackathon
+[Payment Processor] Completed: 0 total payments processed in 14602ms
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[Sheets Service] Scanning tabs in 1Bf0B1jzSMIE0IGz8BWBvBLHH_gQUz_04hhfxJ0-d2os...
+[Payment Processor] Found 0 pending payments in CS Events

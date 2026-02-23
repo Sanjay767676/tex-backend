@@ -1,0 +1,60 @@
+﻿[dotenv@17.3.1] injecting env (13) from .env -- tip: ΓÜÖ∩╕Å  override existing env vars with { override: true }
+[Env Config] Loaded GOOGLE_SERVICE_ACCOUNT_JSON from file
+[Google Sheets] Auth initialized via GOOGLE_SERVICE_ACCOUNT_JSON
+Server is running on port 3000
+Running with BASE_URL: http://localhost:3000
+[SMTP] Resolved smtp.gmail.com ΓåÆ 192.178.211.109
+[SMTP] CS Ready (port 465, IPv4)
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[SMTP] NCS Ready (port 465, IPv4)
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 25)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 27)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 25)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 27)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "mailSent" ΓåÆ "Mail_Sent" (column 30)
+[Debug] CS Events Columns - Payment: 25, Token: 27, MailSent: 30
+[Debug] Row Count (including header): 1
+[Payment Processor] Found 0 pending payments in CS Events
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 19)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 21)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 19)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 21)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "mailSent" ΓåÆ "Mail_Sent" (column 24)
+[Payment Processor] Found 0 pending payments in CS Workshop
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 30)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 32)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 30)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 32)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "mailSent" ΓåÆ "Mail_Sent" (column 35)
+[Payment Processor] Found 0 pending payments in CS Hackathon
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 37)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 39)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 37)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 39)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "mailSent" ΓåÆ "Mail_Sent" (column 42)
+[Payment Processor] Found 0 pending payments in NCS Events
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 21)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 23)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 21)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 23)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "mailSent" ΓåÆ "Mail_Sent" (column 26)
+[Payment Processor] Found 0 pending payments in NCS Workshop
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 30)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 32)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "paymentStatus" ΓåÆ "Payment status" (column 30)
+[Column Resolver] Γ£à Resolved "token" ΓåÆ "Token" (column 32)
+[Column Resolver] Γ£à Resolved "timestamp" ΓåÆ "Timestamp" (column 0)
+[Column Resolver] Γ£à Resolved "mailSent" ΓåÆ "Mail_Sent" (column 35)
+[Payment Processor] Found 0 pending payments in NCS Hackathon
+[Payment Processor] Completed: 0 total payments processed in 3166ms

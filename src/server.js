@@ -38,8 +38,8 @@ const runAutomaticPaymentCheck = async () => {
     }
 };
 
-// Start polling every 10 seconds
-const pollingInterval = setInterval(runAutomaticPaymentCheck, 10000);
+// Poll every 90 seconds to stay within Google Sheets API quota
+const pollingInterval = setInterval(runAutomaticPaymentCheck, 90000);
 
 // Run first check immediately (optional - remove if you want to wait 10s)
 setTimeout(runAutomaticPaymentCheck, 2000);
@@ -47,7 +47,7 @@ setTimeout(runAutomaticPaymentCheck, 2000);
 // Graceful shutdown handling
 const shutdown = (signal) => {
     console.log(`Received ${signal}. Shutting down gracefully...`);
-    
+
     // Stop polling
     clearInterval(pollingInterval);
     console.log('[Payment Processor] Automatic polling stopped');

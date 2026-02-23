@@ -99,7 +99,7 @@ const renderEmailTemplate = ({
     message,
     day1Events,
     day2Events,
-        scanUrl,
+    scanUrl,
 }) => {
     const day1Html = renderEventList(day1Events);
     const day2Html = renderEventList(day2Events);
@@ -241,37 +241,59 @@ const sendConfirmationEmail = async ({
     senderType,
     to,
     name,
-    day1Events,
-    day2Events,
-    scanUrl,
+    token,
+    pdfBuffer
 }) => {
     const transporter = await getTransporter(senderType);
-    const htmlBody = renderEmailTemplate({
-        title: 'Registration Confirmed',
-        greeting: `Hello <strong>${name}</strong>,`,
-        message: 'Thank you for registering for Texperia 2026! Your registration is confirmed. Below is your QR code for entry and your selected events.',
-        day1Events,
-        day2Events,
-        scanUrl,
-    });
+
+    const htmlBody = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body { font-family: sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
+                .footer { margin-top: 30px; font-size: 12px; color: #777; border-top: 1px solid #eee; padding-top: 10px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>Texperia 2026 Registration Confirmed</h2>
+                <p>Hi <strong>${name}</strong>,</p>
+                <p>Your Texperia 2026 registration is confirmed.</p>
+                <p>Please find your <strong>Registration Pass</strong> attached to this email as a PDF.</p>
+                <p><strong>Carry this PDF (digital or printed) to the venue.</strong> Your QR code inside the PDF will be scanned at entry.</p>
+                <p>Best Regards,<br>Texperia Team</p>
+                
+                <div class="footer">
+                    <p>© 2026 Texperia. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
 
     const mailOptions = {
         from: senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER,
         to,
         subject: 'Texperia 2026 Registration Confirmed',
         html: htmlBody,
+        attachments: [
+            {
+                filename: `Texperia_Pass_${token}.pdf`,
+                content: pdfBuffer,
+            }
+        ]
     };
 
     try {
-        console.log('Preparing to send email to:', to);
+        console.log(`[Email Service] Sending registration pass to: ${to}`);
         const info = await transporter.sendMail(mailOptions);
-        console.log('Email sent successfully:', info.response);
+        console.log(`[Email Service] Email sent successfully: ${info.response}`);
         return true;
     } catch (error) {
-        console.error('EMAIL ERROR FULL OBJECT:', error);
-        if (error.response) {
-            console.error('SMTP RESPONSE:', error.response);
-        }
+        console.error('[Email Service] Error sending registration email:', error);
         return false;
     }
 };
@@ -282,35 +304,112 @@ const sendAttendanceEmail = async ({
     name,
     day1Events,
     day2Events,
-    scanUrl,
 }) => {
     const transporter = await getTransporter(senderType);
-    const htmlBody = renderEmailTemplate({
-        title: 'Attendance Confirmed',
-        greeting: `Hello <strong>${name}</strong>,`,
-        message: 'Your attendance has been recorded successfully. Please keep your QR code for reference.',
-        day1Events,
-        day2Events,
-        scanUrl,
-    });
+    
+    // Format events list
+    const allEvents = [...day1Events, ...day2Events];
+    const eventsList = allEvents.length > 0 ? allEvents.join(', ') : 'Registered Events';
+    
+    const htmlBody = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    background-color: #f4f4f4;
+                    margin: 0;
+                    padding: 0;
+                }
+                .container {
+                    max-width: 600px;
+                    margin: 20px auto;
+                    background-color: #ffffff;
+                    padding: 30px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                }
+                .header {
+                    text-align: center;
+                    border-bottom: 3px solid #4CAF50;
+                    padding-bottom: 20px;
+                    margin-bottom: 20px;
+                }
+                .header h1 {
+                    color: #4CAF50;
+                    margin: 0;
+                    font-size: 28px;
+                }
+                .content {
+                    font-size: 16px;
+                    margin: 20px 0;
+                    color: #333;
+                    line-height: 1.8;
+                }
+                .highlight {
+                    color: #4CAF50;
+                    font-weight: bold;
+                }
+                .footer {
+                    text-align: center;
+                    padding-top: 20px;
+                    border-top: 1px solid #eee;
+                    color: #999;
+                    font-size: 12px;
+                    margin-top: 30px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Texperia 2026</h1>
+                </div>
+                
+                <div class="content">
+                    <p>Hi <span class="highlight">${name}</span>,</p>
+                    
+                    <p>Your <span class="highlight">attendance has been confirmed</span> for Texperia 2026!</p>
+                    
+                    <p><strong>Registered Events:</strong><br>${eventsList}</p>
+                    
+                    <p style="background-color: #f0f8f0; padding: 15px; border-left: 4px solid #4CAF50; margin: 20px 0;">
+                        <strong>Please reach out to your designated venue ASAP!</strong><br>
+                        Venue details will be shared separately. Make sure to arrive on time.
+                    </p>
+                    
+                    <p>Thank you for registering with us. We look forward to seeing you!</p>
+                    
+                    <p>Best regards,<br><strong>Texperia Team</strong></p>
+                </div>
+                
+                <div class="footer">
+                    <p>This is an automated email. Please do not reply.</p>
+                    <p>&copy; 2026 Texperia. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
 
     const mailOptions = {
         from: senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER,
         to,
-        subject: 'Texperia 2026 Attendance Confirmed',
+        subject: 'Texperia 2026 - Attendance Confirmed ✓',
         html: htmlBody,
     };
 
     try {
-        console.log('Preparing to send email to:', to);
+        console.log('Preparing to send attendance email to:', to);
         const info = await transporter.sendMail(mailOptions);
-        console.log('Email sent successfully:', info.response);
+        console.log('Attendance email sent successfully:', info.response);
         return true;
     } catch (error) {
-        console.error('EMAIL ERROR FULL OBJECT:', error);
-        if (error.response) {
-            console.error('SMTP RESPONSE:', error.response);
-        }
+        console.error('EMAIL ERROR:', error.message);
         return false;
     }
 };

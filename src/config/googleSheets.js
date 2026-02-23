@@ -1,4 +1,5 @@
 const { google } = require('googleapis');
+require('./env'); // Ensure environment is loaded and service account JSON is populated
 
 let auth;
 

@@ -5,6 +5,9 @@ const { handleScan } = require('../services/sheetsService');
 
 const router = express.Router();
 
+// Add JSON body parser to this router
+router.use(express.json());
+
 const scanLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 120,

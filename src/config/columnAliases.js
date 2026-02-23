@@ -80,6 +80,7 @@ const columnAliases = {
 
     // QR code link column variations
     qrLink: [
+        'QR_Links',
         'QR_Link',
         'QR Link',
         'QR Code',
@@ -100,6 +101,19 @@ const columnAliases = {
         'day2',
         'day_2',
         'second day',
+        'Day 2 - Technical',
+        'Day 2 - Non-Technical',
+    ],
+
+    // Department column variations
+    department: [
+        'Department',
+        'Dept',
+        'Branch',
+        'Stream',
+        'Course',
+        'Year & Dept',
+        'Year and Department',
     ],
 };
 

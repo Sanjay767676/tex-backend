@@ -1,0 +1,47 @@
+﻿[dotenv@17.3.1] injecting env (13) from .env -- tip: ≡ƒ¢á∩╕Å  run anywhere with `dotenvx run -- yourcommand`
+[Env Config] Loaded GOOGLE_SERVICE_ACCOUNT_JSON from file
+[Google Sheets] Auth initialized via GOOGLE_SERVICE_ACCOUNT_JSON
+Server is running on port 3000
+Running with BASE_URL: http://localhost:3000
+[SMTP] Resolved smtp.gmail.com ΓåÆ 192.178.211.109
+[SMTP] CS Ready (port 465, IPv4)
+[Payment Processor] Starting automatic payment check across 6 sheets...
+[SMTP] NCS Ready (port 465, IPv4)
+[Payment Processor] Found 0 pending payments in CS Events
+node : [Sheets 
+Service] ΓÜá∩╕Å API 
+Quota Exceeded for 1B
+f0B1jzSMIE0IGz8BWBvBL
+HH_gQUz_04hhfxJ0-d2os
+.
+At line:1 char:1
++ node src/server.js 
+> 
+server_log_final.txt 
+2>&1
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: ([Sheets   
+  Service..._04hh    
+fxJ0-d2os.:Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+[Sheets Service] 
+ΓÜá∩╕Å API Quota 
+Exceeded for 1I6jMb80
+O026WuN_FDJBVbRjgbZHI
+AckiTUK6bNVlcYg.
+[Payment Processor] Found 0 pending payments in CS Workshop
+[Sheets Service] 
+ΓÜá∩╕Å API Quota 
+Exceeded for 1O5uno5y
+z98JU5BeOrD6wm11gYSfR
+TzWNfnahz_T_pBM.
+[Payment Processor] Found 0 pending payments in CS Hackathon

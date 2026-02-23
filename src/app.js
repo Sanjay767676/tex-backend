@@ -11,13 +11,11 @@ app.set('trust proxy', 1);
 
 app.use(cors());
 
-// Mount /scan BEFORE express.json() to avoid JSON parsing conflicts
-app.use('/', scanRoutes);
-
-// Then apply JSON body parser for remaining routes
+// Apply JSON body parser for all routes
 app.use(express.json());
 
-// Routes
+// Mount routes
+app.use('/', scanRoutes);
 app.use('/', connectionRoutes);
 app.use('/', paymentRoutes);
 

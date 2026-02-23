@@ -1,12 +1,30 @@
 const dotenv = require('dotenv');
 const path = require('path');
+const fs = require('fs');
 
 // Load environment variables from .env
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
+// Immediate loading of service account JSON from file if needed
+if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON && process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    try {
+        const keyPath = path.join(__dirname, '../../', process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+        if (fs.existsSync(keyPath)) {
+            process.env.GOOGLE_SERVICE_ACCOUNT_JSON = fs.readFileSync(keyPath, 'utf8');
+            console.log('[Env Config] Loaded GOOGLE_SERVICE_ACCOUNT_JSON from file');
+        }
+    } catch (err) {
+        console.error('[Env Config] Failed to load service account file:', err.message);
+    }
+}
+
 const required = [
-    'CS_SHEET_ID',
-    'NCS_SHEET_ID',
+    'CS_EVENTS_SHEET_ID',
+    'CS_WORKSHOP_SHEET_ID',
+    'CS_HACKATHON_SHEET_ID',
+    'NCS_EVENTS_SHEET_ID',
+    'NCS_WORKSHOP_SHEET_ID',
+    'NCS_HACKATHON_SHEET_ID',
     'BASE_URL',
     'CS_EMAIL_USER',
     'CS_EMAIL_PASS',
@@ -27,8 +45,16 @@ const validateEnv = () => {
 const env = {
     port: process.env.PORT || '3000',
     baseUrl: String(process.env.BASE_URL || '').trim().replace(/\/$/, ''),
-    csSheetId: String(process.env.CS_SHEET_ID || '').trim(),
-    ncsSheetId: String(process.env.NCS_SHEET_ID || '').trim(),
+    csSheets: {
+        events: String(process.env.CS_EVENTS_SHEET_ID || '').trim(),
+        workshop: String(process.env.CS_WORKSHOP_SHEET_ID || '').trim(),
+        hackathon: String(process.env.CS_HACKATHON_SHEET_ID || '').trim(),
+    },
+    ncsSheets: {
+        events: String(process.env.NCS_EVENTS_SHEET_ID || '').trim(),
+        workshop: String(process.env.NCS_WORKSHOP_SHEET_ID || '').trim(),
+        hackathon: String(process.env.NCS_HACKATHON_SHEET_ID || '').trim(),
+    },
     csEmailUser: String(process.env.CS_EMAIL_USER || '').trim(),
     csEmailPass: String(process.env.CS_EMAIL_PASS || '').trim(),
     ncsEmailUser: String(process.env.NCS_EMAIL_USER || '').trim(),

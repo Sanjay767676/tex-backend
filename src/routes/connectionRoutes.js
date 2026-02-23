@@ -5,14 +5,14 @@ const router = express.Router();
 
 router.get('/test-connection', async (req, res) => {
     try {
-        // Read first 5 rows (e.g., A1:Z5)
-        // Assuming data starts from row 1. You might want to adjust the range.
-        const csRows = await getSheetRows(env.csSheetId, 'A1:E5');
-        const ncsRows = await getSheetRows(env.ncsSheetId, 'A1:E5');
+        // Test first sheet of each domain to verify auth
+        const csRow = await getSheetRows(env.csSheets.events, 'A1:E1');
+        const ncsRow = await getSheetRows(env.ncsSheets.events, 'A1:E1');
 
         res.json({
-            csRows,
-            ncsRows,
+            status: 'Auth Success',
+            csTest: csRow,
+            ncsTest: ncsRow,
         });
     } catch (error) {
         res.status(500).json({

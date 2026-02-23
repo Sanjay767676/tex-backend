@@ -1,8 +1,11 @@
+const { env } = require('../config/env');
 const sheets = require('../config/googleSheets');
 const { randomUUID } = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const QRCode = require('qrcode');
-const { env } = require('../config/env');
 const { sendConfirmationEmail, sendAttendanceEmail } = require('./emailService');
+const { generateRegistrationPass } = require('./pdfService');
 const {
     normalizeValue,
     getColumnByAlias,
@@ -13,80 +16,227 @@ const {
     getDayType,
 } = require('../utils/columnResolver');
 
-const SHEET_NAME = 'Form Responses 1';
+const SHEET_NAME = 'A:ZZ';
+
+// ─── Rate limiting & retry helpers ───────────────────────────────────────────
+const MIN_REQUEST_GAP_MS = 1500; // minimum ms between Sheets API calls
+let lastRequestTime = 0;
+
+const throttle = () => {
+    const now = Date.now();
+    const wait = Math.max(0, MIN_REQUEST_GAP_MS - (now - lastRequestTime));
+    lastRequestTime = now + wait;
+    return wait > 0 ? new Promise(resolve => setTimeout(resolve, wait)) : Promise.resolve();
+};
+
+/**
+ * Wraps a Sheets API call with throttling + exponential back-off retry.
+ * Retries on 429 (rate limit) and 503 (service unavailable / quota).
+ */
+const callWithRetry = async (fn, maxRetries = 4) => {
+    let attempt = 0;
+    while (true) {
+        await throttle();
+        try {
+            return await fn();
+        } catch (err) {
+            const code = err?.code || err?.response?.status;
+            const isRetryable =
+                code === 429 ||
+                code === 503 ||
+                (err.message && err.message.includes('Quota exceeded')) ||
+                (err.message && err.message.includes('Rate Limit'));
+
+            attempt++;
+            if (!isRetryable || attempt > maxRetries) throw err;
+
+            const backoff = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+            const jitter = Math.floor(Math.random() * 1000);
+            console.log(`[Sheets Service] ⏳ Quota/rate-limit hit – retrying in ${backoff + jitter}ms (attempt ${attempt}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, backoff + jitter));
+        }
+    }
+};
+// ─────────────────────────────────────────────────────────────────────────────
 const HEADER_CACHE_TTL_MS = 5 * 60 * 1000;
+const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
 const TOKEN_REGEX = /^(CS|NCS)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CACHE_FILE = path.join(process.cwd(), 'sheet_metadata_cache.json');
 
 const headerCache = new Map();
 
+// Persistent metadata cache
+const loadMetadataCache = () => {
+    try {
+        if (fs.existsSync(CACHE_FILE)) {
+            const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+            console.log(`[Sheets Service] 💾 Loaded persistence cache for ${Object.keys(data).length} sheets`);
+            return new Map(Object.entries(data));
+        }
+    } catch (e) {
+        console.error('[Sheets Service] Failed to load metadata cache:', e.message);
+    }
+    return new Map();
+};
+
+const saveMetadataCache = (cache) => {
+    try {
+        const data = Object.fromEntries(cache);
+        fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
+    } catch (e) {
+        console.error('[Sheets Service] Failed to save metadata cache:', e.message);
+    }
+};
+
+const metadataCache = loadMetadataCache();
+
+/**
+ * Helper to fetch headers and build map
+ */
 const getHeaderInfo = async (spreadsheetId) => {
     const cached = headerCache.get(spreadsheetId);
     if (cached && Date.now() - cached.timestamp < HEADER_CACHE_TTL_MS) {
         return cached.data;
     }
 
-    const response = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: `${SHEET_NAME}!1:1`,
-    });
+    const response = await callWithRetry(() =>
+        sheets.spreadsheets.values.get({
+            spreadsheetId,
+            range: '1:1',
+        })
+    );
 
     const headers = response.data.values ? response.data.values[0] : [];
-    console.log(`[Sheets Service] Detected headers: ${headers.join(', ')}`);
-    
     const headerMap = buildHeaderMap(headers);
     const data = { headers, headerMap };
     headerCache.set(spreadsheetId, { data, timestamp: Date.now() });
     return data;
 };
 
+/**
+ * Raw row fetcher
+ */
 const getSheetRows = async (spreadsheetId, range) => {
-    try {
-        const response = await sheets.spreadsheets.values.get({
+    const response = await callWithRetry(() =>
+        sheets.spreadsheets.values.get({
             spreadsheetId,
             range,
-        });
-        return response.data.values || [];
-    } catch (error) {
-        console.error(`[Sheets Service] Error reading sheet ${spreadsheetId}:`, error.message);
-        throw error;
-    }
+        })
+    );
+    return response.data.values || [];
 };
 
-const getPendingPayments = async (spreadsheetId) => {
+/**
+ * Parses raw sheet rows into structured pending objects
+ */
+const parseRows = (rows, spreadsheetId, sheetTitle) => {
+    if (rows.length === 0) return [];
+
+    const headers = rows[0];
+    const headerMap = buildHeaderMap(headers);
+
     try {
-        const rows = await getSheetRows(spreadsheetId, SHEET_NAME);
-        if (rows.length === 0) return { headers: [], pending: [] };
-
-        const headers = rows[0];
-        const headerMap = buildHeaderMap(headers);
-
-        // Validate required columns using aliases
         validateRequiredColumns(headers, headerMap, ['paymentStatus', 'token', 'timestamp']);
+    } catch (e) {
+        return [];
+    }
 
-        const paymentStatusIdx = getColumnByAlias(headerMap, 'paymentStatus');
-        const tokenIdx = getColumnByAlias(headerMap, 'token');
-        const timestampIdx = getColumnByAlias(headerMap, 'timestamp');
-        const mailSentIdx = getColumnByAlias(headerMap, 'mailSent');
+    const paymentStatusIdx = getColumnByAlias(headerMap, 'paymentStatus');
+    const tokenIdx = getColumnByAlias(headerMap, 'token');
+    const timestampIdx = getColumnByAlias(headerMap, 'timestamp');
+    const mailSentIdx = getColumnByAlias(headerMap, 'mailSent');
 
-        const pending = rows.slice(1).map((row, index) => {
-            const status = normalizeValue(row[paymentStatusIdx]).toUpperCase();
-            const token = normalizeValue(row[tokenIdx]);
-            const timestamp = normalizeValue(row[timestampIdx]);
-            const mailSent = mailSentIdx === -1 ? '' : normalizeValue(row[mailSentIdx]).toUpperCase();
+    return rows.slice(1).map((row, index) => {
+        const rowIndex = index + 2;
+        const status = normalizeValue(row[paymentStatusIdx]).toUpperCase();
+        const token = normalizeValue(row[tokenIdx]);
+        const timestamp = normalizeValue(row[timestampIdx]);
+        const mailSent = mailSentIdx === -1 ? '' : normalizeValue(row[mailSentIdx]).toUpperCase();
 
+        if (status === 'APPROVED' && token === '' && (mailSent === '' || mailSent === 'NO')) {
+            console.log(`[Sheets Service] Row ${rowIndex} matches criteria on "${sheetTitle}"`);
             return {
-                rowIndex: index + 2,
+                rowIndex,
                 row,
                 status,
                 token,
                 timestamp,
                 mailSent,
             };
-        }).filter(item => item.status === 'APPROVED' && item.token === '' && item.timestamp !== '');
+        }
 
-        return { headers, pending };
+        // Log "why skipped" for the first 5 rows to avoid bloat
+        if (index < 5) {
+            let reason = '';
+            if (status !== 'APPROVED') reason = `Status is "${status}"`;
+            else if (token !== '') reason = 'Token already exists';
+            else if (mailSent === 'YES') reason = 'Mail already sent';
+
+            if (reason && spreadsheetId === env.csSheets.events) {
+                console.log(`[Sheets Service] Row ${rowIndex} skipped on "${sheetTitle}": ${reason}`);
+            }
+        }
+
+        return null;
+    }).filter(item => item !== null);
+};
+
+/**
+ * Core function to find pending payments across tabs
+ */
+const getPendingPayments = async (spreadsheetId) => {
+    try {
+        // 1. Check metadata cache
+        let cachedMetadata = metadataCache.get(spreadsheetId);
+        if (cachedMetadata && Date.now() - cachedMetadata.timestamp < METADATA_TTL_MS) {
+            const { sheetTitle } = cachedMetadata;
+            const rows = await getSheetRows(spreadsheetId, `'${sheetTitle}'!${SHEET_NAME}`);
+            if (rows.length > 0) {
+                const pending = parseRows(rows, spreadsheetId, sheetTitle);
+                return { headers: rows[0], pending, sheetTitle };
+            }
+        }
+
+        // 2. Scan tabs
+        const spreadsheet = await callWithRetry(() =>
+            sheets.spreadsheets.get({ spreadsheetId })
+        );
+        const allSheets = spreadsheet.data.sheets;
+
+        console.log(`[Sheets Service] Scanning ${allSheets.length} tabs in ${spreadsheetId}...`);
+
+        for (const sheet of allSheets) {
+            const sheetTitle = sheet.properties.title;
+            const range = `'${sheetTitle}'!${SHEET_NAME}`;
+
+            const rows = await getSheetRows(spreadsheetId, range);
+
+            if (rows.length > 0) {
+                const headers = rows[0];
+                const headerMap = buildHeaderMap(headers);
+
+                try {
+                    validateRequiredColumns(headers, headerMap, ['paymentStatus', 'token', 'timestamp']);
+
+                    console.log(`[Sheets Service] ✅ Targeted valid tab: "${sheetTitle}"`);
+                    metadataCache.set(spreadsheetId, { sheetTitle, timestamp: Date.now() });
+                    saveMetadataCache(metadataCache);
+
+                    const pending = parseRows(rows, spreadsheetId, sheetTitle);
+                    return { headers, pending, sheetTitle };
+                } catch (e) {
+                    continue; // Structural mismatch, check next tab
+                }
+            }
+        }
+
+        return { headers: [], pending: [] };
     } catch (error) {
-        console.error('[Sheets Service] Error getting pending payments:', error.message);
+        if (error.message.includes('Quota exceeded')) {
+            console.error(`[Sheets Service] ⚠️ API Quota Exceeded for ${spreadsheetId}.`);
+        } else {
+            console.error(`[Sheets Service] Error in getPendingPayments for ${spreadsheetId}:`, error.message);
+        }
         return { headers: [], pending: [] };
     }
 };
@@ -97,7 +247,7 @@ const extractEvents = (row, headers) => {
 
     headers.forEach((header, index) => {
         if (index >= row.length) return;
-        
+
         const cellValue = normalizeValue(row[index]);
         if (!cellValue) return;
 
@@ -118,33 +268,32 @@ const generateQRCode = async (token) => {
     return { qrBase64: qrDataUrl, scanUrl };
 };
 
-const updateRowColumns = async (spreadsheetId, rowIndex, updates, headers, headerMap) => {
+const updateRowColumns = async (spreadsheetId, rowIndex, updates, headers, headerMap, sheetTitle) => {
     const data = [];
 
     Object.entries(updates).forEach(([aliasKey, value]) => {
         const colLetter = getColumnLetterByAlias(headers, headerMap, aliasKey);
         if (colLetter) {
             data.push({
-                range: `${SHEET_NAME}!${colLetter}${rowIndex}`,
+                range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
                 values: [[value]],
             });
-        } else {
-            console.warn(`[Sheets Service] Column "${aliasKey}" not found, skipping update`);
         }
     });
 
     if (data.length === 0) return null;
 
-    const response = await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId,
-        requestBody: {
-            valueInputOption: 'USER_ENTERED',
-            data,
-        },
-    });
+    const response = await callWithRetry(() =>
+        sheets.spreadsheets.values.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data,
+            },
+        })
+    );
 
-    console.log(`[Sheets Service] Updated ${data.length} columns in row ${rowIndex}`);
-
+    console.log(`[Sheets Service] Updated row ${rowIndex} in ${spreadsheetId}`);
     return response.data;
 };
 
@@ -152,17 +301,19 @@ const buildToken = (prefix) => `${prefix}-${randomUUID()}`;
 
 const isValidToken = (token) => TOKEN_REGEX.test(normalizeValue(token));
 
-const getRowByIndex = async (spreadsheetId, rowIndex, headers) => {
+const getRowByIndex = async (spreadsheetId, rowIndex, headers, sheetTitle) => {
     const lastColumn = indexToColumn(Math.max(headers.length - 1, 0));
-    const range = `${SHEET_NAME}!A${rowIndex}:${lastColumn}${rowIndex}`;
-    const response = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range,
-    });
+    const range = `'${sheetTitle}'!A${rowIndex}:${lastColumn}${rowIndex}`;
+    const response = await callWithRetry(() =>
+        sheets.spreadsheets.values.get({
+            spreadsheetId,
+            range,
+        })
+    );
     return response.data.values ? response.data.values[0] : [];
 };
 
-const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, senderType) => {
+const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, senderType, sheetTitle) => {
     const processed = [];
     const { headerMap } = await getHeaderInfo(spreadsheetId);
 
@@ -172,14 +323,17 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
     for (const payment of pendingPayments) {
         try {
             console.log(`\n[Payment Processing] Processing row ${payment.rowIndex}...`);
-            
-            const latestRow = await getRowByIndex(spreadsheetId, payment.rowIndex, headers);
-            
+
+            const latestRow = await getRowByIndex(spreadsheetId, payment.rowIndex, headers, sheetTitle);
+
             // Get column indices using aliases
             const paymentStatusIdx = getColumnByAlias(headerMap, 'paymentStatus');
             const tokenIdx = getColumnByAlias(headerMap, 'token');
             const timestampIdx = getColumnByAlias(headerMap, 'timestamp');
             const mailSentIdx = getColumnByAlias(headerMap, 'mailSent');
+            const nameIdx = getColumnByAlias(headerMap, 'name');
+            const emailIdx = getColumnByAlias(headerMap, 'email');
+            const deptIdx = getColumnByAlias(headerMap, 'department');
 
             const status = normalizeValue(latestRow[paymentStatusIdx]).toUpperCase();
             const existingToken = normalizeValue(latestRow[tokenIdx]);
@@ -187,67 +341,70 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             const mailSent = mailSentIdx === -1 ? '' : normalizeValue(latestRow[mailSentIdx]).toUpperCase();
 
             // Double-check eligibility
-            if (status !== 'APPROVED' || existingToken !== '' || timestamp === '') {
+            if (status !== 'APPROVED' || existingToken !== '') {
                 console.log(`[Payment Processing] ⏭️ Row ${payment.rowIndex} no longer eligible - skipping`);
                 continue;
             }
 
-            // Generate token and QR
+            // Generate token and QR data
             const token = buildToken(senderType);
             const { qrBase64, scanUrl } = await generateQRCode(token);
             const { day1Events, day2Events } = extractEvents(latestRow, headers);
 
             console.log(`[Payment Processing] ✅ Token generated: ${token}`);
-            console.log(`[Payment Processing] 📊 Events - Day1: ${day1Events.length}, Day2: ${day2Events.length}`);
 
-            // Get student information using aliases
-            const nameIdx = getColumnByAlias(headerMap, 'name');
-            const emailIdx = getColumnByAlias(headerMap, 'email');
-            
+            // Student information
             const studentName = nameIdx !== -1 ? normalizeValue(latestRow[nameIdx]) || 'Student' : 'Student';
             const studentEmail = emailIdx !== -1 ? normalizeValue(latestRow[emailIdx]) : '';
+            const department = deptIdx !== -1 ? normalizeValue(latestRow[deptIdx]) : 'N/A';
 
-            // PHASE 3+4: Update sheet FIRST (token, QR, timestamp) before sending email
+            // Determine registration day
+            let dayText = 'N/A';
+            if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
+            else if (day1Events.length > 0) dayText = 'Day 1';
+            else if (day2Events.length > 0) dayText = 'Day 2';
+
+            // Generate PDF Buffer
+            console.log(`[Payment Processor] 📄 Generating PDF for ${studentName}...`);
+            const pdfBuffer = await generateRegistrationPass({
+                studentName,
+                studentEmail,
+                department,
+                day: dayText,
+                eventsList: [...day1Events, ...day2Events],
+                token,
+                qrBase64
+            });
+
+            // Update sheet FIRST (token, QR Link, Time, Pending Mail)
             const updates = {
-                token: token,
+                token,
                 qrLink: scanUrl,
                 tokenGeneratedTime: new Date().toISOString(),
                 mailSent: 'PENDING',
             };
 
-            await updateRowColumns(spreadsheetId, payment.rowIndex, updates, headers, headerMap);
-            console.log(`[Payment Processing] ✅ Sheet updated for row ${payment.rowIndex}`);
+            await updateRowColumns(spreadsheetId, payment.rowIndex, updates, headers, headerMap, sheetTitle);
 
-            // PHASE 3: Send email NON-BLOCKING — do not await
-            if (studentEmail && (mailSent === '' || mailSent === 'NO')) {
-                console.log(`[Payment Processing] 📤 Queueing email to ${studentEmail} (non-blocking)...`);
+            // Send email
+            if (studentEmail) {
+                console.log(`[Payment Processor] 📤 Sending email to ${studentEmail}...`);
                 sendConfirmationEmail({
                     senderType,
                     to: studentEmail,
                     name: studentName,
-                    day1Events,
-                    day2Events,
-                    scanUrl,
+                    token,
+                    pdfBuffer
                 }).then(async (emailResult) => {
                     const mailStatus = emailResult ? 'YES' : 'NO';
-                    console.log(`[Payment Processing] ${emailResult ? '✅' : '❌'} Email ${mailStatus} for row ${payment.rowIndex}`);
-                    try {
-                        await updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: mailStatus }, headers, headerMap);
-                    } catch (updateErr) {
-                        console.error(`[Payment Processing] Failed to update Mail_Sent for row ${payment.rowIndex}:`, updateErr.message);
-                    }
+                    await updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: mailStatus }, headers, headerMap, sheetTitle);
                 }).catch((err) => {
-                    console.error(`[Payment Processing] ❌ Email error for row ${payment.rowIndex}:`, err.message);
-                    updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: 'NO' }, headers, headerMap).catch(() => {});
+                    console.error(`[Payment Processor] ❌ Email error (Catch) for row ${payment.rowIndex}:`, err);
+                    updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: 'NO' }, headers, headerMap, sheetTitle).catch(() => { });
                 });
             } else {
-                if (!studentEmail) {
-                    console.warn(`[Payment Processing] ⚠️ No email for row ${payment.rowIndex}`);
-                    await updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: 'NO_EMAIL' }, headers, headerMap);
-                }
-                if (mailSent === 'YES') {
-                    console.log(`[Payment Processing] ⏭️ Email already sent for row ${payment.rowIndex}`);
-                }
+                console.warn(`[Payment Processor] ⚠️ No email found for row ${payment.rowIndex}`);
+                await updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: 'NO_EMAIL' }, headers, headerMap, sheetTitle);
             }
 
             processed.push({
@@ -255,10 +412,8 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
                 senderType,
                 emailSent: 'QUEUED',
             });
-
-            console.log(`[Payment Processing] ✅ Row ${payment.rowIndex} done (email queued)`);
         } catch (error) {
-            console.error(`[Payment Processing] ❌ Failed to process payment at row ${payment.rowIndex}:`, error.message);
+            console.error(`[Payment Processor] ❌ FAILED at row ${payment.rowIndex}:`, error);
         }
     }
 
@@ -267,17 +422,21 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
 
 const findRowByToken = async (spreadsheetId, token) => {
     const { headers, headerMap } = await getHeaderInfo(spreadsheetId);
-    
-    // Validate required columns using aliases
     validateRequiredColumns(headers, headerMap, ['token']);
 
-    const tokenCol = getColumnLetterByAlias(headers, headerMap, 'token');
-    const range = `${SHEET_NAME}!${tokenCol}2:${tokenCol}`;
+    // Get sheet title from metadata cache (populated by getPendingPayments)
+    const cachedMetadata = metadataCache.get(spreadsheetId);
+    const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
 
-    const response = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range,
-    });
+    const tokenCol = getColumnLetterByAlias(headers, headerMap, 'token');
+    const range = `'${sheetTitle}'!${tokenCol}2:${tokenCol}`;
+
+    const response = await callWithRetry(() =>
+        sheets.spreadsheets.values.get({
+            spreadsheetId,
+            range,
+        })
+    );
 
     const values = response.data.values || [];
     const normalizedToken = normalizeValue(token);
@@ -285,18 +444,15 @@ const findRowByToken = async (spreadsheetId, token) => {
     for (let i = 0; i < values.length; i += 1) {
         const cellValue = normalizeValue(values[i][0]);
         if (cellValue && cellValue === normalizedToken) {
-            return { rowIndex: i + 2, headers, headerMap };
+            return { rowIndex: i + 2, headers, headerMap, sheetTitle };
         }
     }
-
     return null;
 };
 
-const markAttendancePresent = async (spreadsheetId, rowIndex, headers, headerMap) => {
-    // Validate required columns using aliases
+const markAttendancePresent = async (spreadsheetId, rowIndex, headers, headerMap, sheetTitle) => {
     validateRequiredColumns(headers, headerMap, ['attendance']);
-    const updates = { attendance: 'PRESENT' };
-    await updateRowColumns(spreadsheetId, rowIndex, updates, headers, headerMap);
+    await updateRowColumns(spreadsheetId, rowIndex, { attendance: 'PRESENT' }, headers, headerMap, sheetTitle);
 };
 
 const handleScan = async (token) => {
@@ -309,9 +465,19 @@ const handleScan = async (token) => {
     }
 
     const senderType = normalizedToken.toUpperCase().startsWith('NCS-') ? 'NCS' : 'CS';
-    const spreadsheetId = senderType === 'NCS' ? env.ncsSheetId : env.csSheetId;
+    const sheetIds = senderType === 'NCS' ? Object.values(env.ncsSheets) : Object.values(env.csSheets);
 
-    const rowInfo = await findRowByToken(spreadsheetId, normalizedToken);
+    let rowInfo = null;
+    let spreadsheetIdFound = null;
+
+    for (const id of sheetIds) {
+        rowInfo = await findRowByToken(id, normalizedToken);
+        if (rowInfo) {
+            spreadsheetIdFound = id;
+            break;
+        }
+    }
+
     if (!rowInfo) {
         const error = new Error('Token not found');
         error.statusCode = 400;
@@ -319,11 +485,9 @@ const handleScan = async (token) => {
     }
 
     const { rowIndex, headers, headerMap } = rowInfo;
+    const spreadsheetId = spreadsheetIdFound;
+    const row = await getRowByIndex(spreadsheetId, rowIndex, headers, rowInfo.sheetTitle);
 
-    // Get the full row for this entry
-    const row = await getRowByIndex(spreadsheetId, rowIndex, headers);
-
-    // Get column indices using aliases
     const attendanceIdx = getColumnByAlias(headerMap, 'attendance');
     const nameIdx = getColumnByAlias(headerMap, 'name');
     const emailIdx = getColumnByAlias(headerMap, 'email');
@@ -335,13 +499,12 @@ const handleScan = async (token) => {
         throw error;
     }
 
-    await markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap);
+    await markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap, rowInfo.sheetTitle);
 
     const studentEmail = emailIdx === -1 ? '' : normalizeValue(row[emailIdx]);
     const studentName = nameIdx === -1 ? 'Student' : normalizeValue(row[nameIdx]) || 'Student';
-    
+
     if (studentEmail) {
-        // Non-blocking: fire and forget attendance email
         const { day1Events, day2Events } = extractEvents(row, headers);
         generateQRCode(normalizedToken).then(({ scanUrl }) => {
             return sendAttendanceEmail({
@@ -352,11 +515,7 @@ const handleScan = async (token) => {
                 day2Events,
                 scanUrl,
             });
-        }).then(() => {
-            console.log(`[Scan Handler] ✅ Attendance email sent to ${studentEmail}`);
-        }).catch((error) => {
-            console.error(`[Scan Handler] ❌ Attendance email failed for ${studentEmail}:`, error.message);
-        });
+        }).catch(() => { });
     }
 
     return { rowIndex, senderType };
