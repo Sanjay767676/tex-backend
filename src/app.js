@@ -14,6 +14,10 @@ app.use(cors());
 // Apply JSON body parser for all routes
 app.use(express.json());
 
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'OK' });
+});
+
 // Mount routes
 app.use('/', scanRoutes);
 app.use('/', connectionRoutes);
