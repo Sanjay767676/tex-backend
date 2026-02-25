@@ -15,6 +15,7 @@ const {
     getColumnLetterByAlias,
     getDayType,
 } = require('../utils/columnResolver');
+const eventConfig = require('../config/eventConfig.json');
 
 const SHEET_NAME = 'A:ZZ';
 
@@ -62,6 +63,10 @@ const HEADER_CACHE_TTL_MS = 5 * 60 * 1000;
 const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
 const TOKEN_REGEX = /^(CS|NCS)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CACHE_FILE = path.join(process.cwd(), 'sheet_metadata_cache.json');
+
+// Using cache abstraction (Redis or In-Memory)
+const cacheService = require('./cacheService');
+let isCacheWarming = false;
 
 const headerCache = new Map();
 
@@ -334,9 +339,11 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             const nameIdx = getColumnByAlias(headerMap, 'name');
             const emailIdx = getColumnByAlias(headerMap, 'email');
             const deptIdx = getColumnByAlias(headerMap, 'department');
+            const collegeIdx = getColumnByAlias(headerMap, 'college');
 
             const status = normalizeValue(latestRow[paymentStatusIdx]).toUpperCase();
             const existingToken = normalizeValue(latestRow[tokenIdx]);
+            const qrLinkInSheet = normalizeValue(latestRow[getColumnByAlias(headerMap, 'qrLink')]);
             const timestamp = normalizeValue(latestRow[timestampIdx]);
             const mailSent = mailSentIdx === -1 ? '' : normalizeValue(latestRow[mailSentIdx]).toUpperCase();
 
@@ -357,6 +364,7 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             const studentName = nameIdx !== -1 ? normalizeValue(latestRow[nameIdx]) || 'Student' : 'Student';
             const studentEmail = emailIdx !== -1 ? normalizeValue(latestRow[emailIdx]) : '';
             const department = deptIdx !== -1 ? normalizeValue(latestRow[deptIdx]) : 'N/A';
+            const college = collegeIdx !== -1 ? normalizeValue(latestRow[collegeIdx]) : 'N/A';
 
             // Determine registration day
             let dayText = 'N/A';
@@ -369,6 +377,7 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             const pdfBuffer = await generateRegistrationPass({
                 studentName,
                 studentEmail,
+                college,
                 department,
                 day: dayText,
                 eventsList: [...day1Events, ...day2Events],
@@ -420,7 +429,72 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
     return processed;
 };
 
+/**
+ * Warms up the in-memory cache by fetching tokens from all configured sheets.
+ */
+const warmupCache = async () => {
+    if (isCacheWarming) return;
+    isCacheWarming = true;
+    console.log('[Sheets Service] 🚀 Warming up registration cache...');
+
+    const allSheetIds = [
+        ...Object.values(env.csSheets),
+        ...Object.values(env.ncsSheets)
+    ];
+
+    for (const spreadsheetId of allSheetIds) {
+        try {
+            const { headers, pending, sheetTitle } = await getPendingPayments(spreadsheetId);
+            const { headerMap } = await getHeaderInfo(spreadsheetId);
+            const tokenIdx = getColumnByAlias(headerMap, 'token');
+            const attendanceIdx = getColumnByAlias(headerMap, 'attendance');
+
+            if (tokenIdx === -1) continue;
+
+            const rows = await getSheetRows(spreadsheetId, `'${sheetTitle}'!${SHEET_NAME}`);
+            if (rows.length < 2) continue;
+
+            rows.slice(1).forEach((row, index) => {
+                const token = normalizeValue(row[tokenIdx]);
+                if (token && isValidToken(token)) {
+                    cacheService.set(token, {
+                        spreadsheetId,
+                        rowIndex: index + 2,
+                        headers,
+                        headerMap,
+                        sheetTitle,
+                        row,
+                        attendance: normalizeValue(row[attendanceIdx]).toUpperCase() === 'PRESENT'
+                    });
+                }
+            });
+        } catch (err) {
+            console.error(`[Sheets Service] Warmup failed for ${spreadsheetId}:`, err.message);
+        }
+    }
+
+    console.log(`[Sheets Service] ✅ Cache warmed up. Mode: ${cacheService.isRedis ? 'Redis' : 'Memory'}`);
+    isCacheWarming = false;
+};
+
+// Start warmup on init and setup periodic refresh
+warmupCache().catch(console.error);
+if (eventConfig.scanCacheEnabled) {
+    const intervalMs = (eventConfig.scanCacheRefreshIntervalMinutes || 15) * 60 * 1000;
+    setInterval(() => {
+        warmupCache().catch(err => console.error('[Sheets Service] Periodic cache refresh failed:', err.message));
+    }, intervalMs);
+}
+
 const findRowByToken = async (spreadsheetId, token) => {
+    const normalizedToken = normalizeValue(token);
+
+    // 1. Check cache abstraction (Redis/Mem) for sub-millisecond lookup
+    const cached = await cacheService.get(normalizedToken);
+    if (cached) {
+        return cached;
+    }
+
     const { headers, headerMap } = await getHeaderInfo(spreadsheetId);
     validateRequiredColumns(headers, headerMap, ['token']);
 
@@ -439,7 +513,6 @@ const findRowByToken = async (spreadsheetId, token) => {
     );
 
     const values = response.data.values || [];
-    const normalizedToken = normalizeValue(token);
 
     for (let i = 0; i < values.length; i += 1) {
         const cellValue = normalizeValue(values[i][0]);
@@ -473,7 +546,7 @@ const handleScan = async (token) => {
     for (const id of sheetIds) {
         rowInfo = await findRowByToken(id, normalizedToken);
         if (rowInfo) {
-            spreadsheetIdFound = id;
+            spreadsheetIdFound = rowInfo.spreadsheetId || id;
             break;
         }
     }
@@ -484,22 +557,33 @@ const handleScan = async (token) => {
         throw error;
     }
 
-    const { rowIndex, headers, headerMap } = rowInfo;
+    const { rowIndex, headers, headerMap, attendance, row: cachedRow } = rowInfo;
     const spreadsheetId = spreadsheetIdFound;
-    const row = await getRowByIndex(spreadsheetId, rowIndex, headers, rowInfo.sheetTitle);
+
+    // Use cached row data if available, otherwise fetch once
+    const row = cachedRow || await getRowByIndex(spreadsheetId, rowIndex, headers, rowInfo.sheetTitle);
 
     const attendanceIdx = getColumnByAlias(headerMap, 'attendance');
     const nameIdx = getColumnByAlias(headerMap, 'name');
     const emailIdx = getColumnByAlias(headerMap, 'email');
 
-    const attendanceValue = attendanceIdx === -1 ? '' : normalizeValue(row[attendanceIdx]).toUpperCase();
-    if (attendanceValue === 'PRESENT') {
+    // Check if already present from cache or row data
+    if (attendance === true || (attendanceIdx !== -1 && normalizeValue(row[attendanceIdx]).toUpperCase() === 'PRESENT')) {
         const error = new Error('Attendance already marked');
         error.statusCode = 409;
         throw error;
     }
 
-    await markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap, rowInfo.sheetTitle);
+    // UPDATE LOCAL CACHE IMMEDIATELY
+    const cached = await cacheService.get(normalizedToken);
+    if (cached) {
+        cached.attendance = true;
+        await cacheService.set(normalizedToken, cached);
+    }
+
+    // PUSH TO SHEETS IN BACKGROUND (Don't await)
+    markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap, rowInfo.sheetTitle)
+        .catch(err => console.error(`[Sheets Service] Background update failed for ${normalizedToken}:`, err.message));
 
     const studentEmail = emailIdx === -1 ? '' : normalizeValue(row[emailIdx]);
     const studentName = nameIdx === -1 ? 'Student' : normalizeValue(row[nameIdx]) || 'Student';

@@ -39,24 +39,43 @@ router.post('/scan', scanLimiter, async (req, res) => {
 router.get('/scan', async (req, res) => {
     try {
         const token = req.query && req.query.token ? String(req.query.token).trim() : '';
-        console.log('QR requested for token:', token);
-
         if (!token) {
-            return res.status(400).send('Token missing');
+            return res.status(400).send('<h1>Error</h1><p>Token missing</p>');
         }
 
-        const qrBuffer = await QRCode.toBuffer(token, {
-            type: 'png',
-            width: 300,
-            margin: 2,
-        });
+        const result = await handleScan(token);
 
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'no-cache');
-        return res.send(qrBuffer);
+        // Return a simple success page for browsers
+        return res.send(`
+            <html>
+                <body style="font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; text-align: center; background: #f0fdf4;">
+                    <div style="padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+                        <h1 style="color: #166534;">✅ Attendance Marked</h1>
+                        <p style="font-size: 1.25rem;">Token type: ${result.senderType}</p>
+                        <p style="color: #4b5563;">Successfully recorded in Google Sheets</p>
+                        <button onclick="window.close()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: #166534; color: white; border: none; border-radius: 0.5rem; cursor: pointer;">Close Pass</button>
+                    </div>
+                </body>
+            </html>
+        `);
     } catch (error) {
-        console.error('QR generation error:', error);
-        return res.status(500).send('QR generation failed');
+        console.error('Browser scan error:', error);
+        const statusCode = error.statusCode || 500;
+        const message = error.message || 'Scan failed';
+        const color = statusCode === 409 ? '#854d0e' : '#991b1b'; // Yellow for conflict, Red for error
+        const title = statusCode === 409 ? '⚠️ Already Marked' : '❌ Scan Failed';
+
+        return res.status(statusCode).send(`
+            <html>
+                <body style="font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; text-align: center; background: #fef2f2;">
+                    <div style="padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+                        <h1 style="color: ${color};">${title}</h1>
+                        <p style="font-size: 1.25rem;">${message}</p>
+                        <button onclick="window.close()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: #4b5563; color: white; border: none; border-radius: 0.5rem; cursor: pointer;">Close</button>
+                    </div>
+                </body>
+            </html>
+        `);
     }
 });
 

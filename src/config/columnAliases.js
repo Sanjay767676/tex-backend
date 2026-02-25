@@ -115,6 +115,15 @@ const columnAliases = {
         'Year & Dept',
         'Year and Department',
     ],
+    // College column variations
+    college: [
+        'College Name',
+        'College',
+        'Name of the College',
+        'Institute',
+        'Institution Name',
+        'College/Institute',
+    ],
 };
 
 module.exports = columnAliases;

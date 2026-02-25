@@ -1,0 +1,173 @@
+@import url('https://fonts.googleapis.com/css2?family=Gabriela&family=Gelasio:wght@400;600&family=Inter:wght@400;600;700&display=swap');
+
+@page {
+    size: A4;
+    margin: 0;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f0f0f0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+.page {
+    background: white;
+    width: 210mm;
+    height: 297mm;
+    margin: 0 auto;
+    padding: 0;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+@media print {
+    body {
+        background-color: white;
+        padding: 0;
+    }
+
+    .page {
+        margin: 0;
+        box-shadow: none;
+    }
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 40px;
+    border-bottom: 2px solid #000;
+}
+
+.header-left img {
+    height: 80px;
+    width: auto;
+}
+
+.header-center {
+    text-align: center;
+}
+
+.header-center img {
+    height: 100px;
+    width: auto;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.header-right img {
+    height: 70px;
+    width: auto;
+}
+
+.content {
+    padding: 60px 40px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.content-info {
+    flex: 1;
+}
+
+.content-qr {
+    width: 200px;
+    text-align: right;
+}
+
+.qr-placeholder {
+    width: 180px;
+    height: 180px;
+    border: 1px solid #000;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f9f9f9;
+}
+
+.qr-image {
+    width: 100%;
+    height: 100%;
+}
+
+h1 {
+    font-size: 32px;
+    margin-bottom: 40px;
+    color: #333;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.info-row {
+    margin-bottom: 25px;
+}
+
+.info-label {
+    font-size: 14px;
+    color: #666;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+}
+
+.info-value {
+    font-size: 22px;
+    font-weight: 600;
+    color: #000;
+}
+
+.footer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 40px;
+    background: #f8f9fa;
+    border-top: 1px solid #eee;
+    text-align: center;
+}
+
+.footer-text {
+    font-size: 14px;
+    color: #888;
+}
+
+/* Lunch Token Specifics */
+.lunch-token-container {
+    padding: 40px;
+}
+
+.lunch-token-card {
+    border: 3px double #000;
+    padding: 40px;
+    margin-top: 40px;
+    text-align: center;
+}
+
+.token-title {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    text-decoration: underline;
+}
+
+.token-qr {
+    margin: 30px auto;
+    width: 250px;
+    height: 250px;
+    border: 1px solid #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}

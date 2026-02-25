@@ -8,6 +8,7 @@ const PDFDocument = require('pdfkit');
 const generateRegistrationPass = async ({
     studentName,
     studentEmail,
+    college,
     department,
     day,
     eventsList,
@@ -38,7 +39,10 @@ const generateRegistrationPass = async ({
             doc.fillColor('#333333').fontSize(12);
             doc.text(`Name: ${studentName}`);
             doc.text(`Email: ${studentEmail}`);
-            doc.text(`Department: ${department || 'N/A'}`);
+            doc.text(`College: ${college || 'N/A'}`);
+            if (department && department !== 'N/A') {
+                doc.text(`Department: ${department}`);
+            }
             doc.text(`Day: ${day}`);
             doc.moveDown(1.5);
 

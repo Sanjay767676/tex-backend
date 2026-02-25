@@ -3,7 +3,7 @@ node_modules/
 *.json
 !package.json
 !package-lock.json
-
+.pdf
 # Test/debug files
 test-*.js
 CREDENTIAL_VERIFICATION.md

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lunch Token - {{name}}</title>
+    <link rel="stylesheet" href="/assets/css/pdf-style.css">
+    <style>
+        .figma-container {
+            width: 794px;
+            height: 1123px;
+            position: relative;
+            background: white;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="figma-container">
+        <!-- Footer Bar -->
+        <div data-layer="Rectangle 1"
+            style="width: 794px; height: 44px; left: 0px; top: 1079px; position: absolute; background: #FACB01"></div>
+
+        <!-- SNS Emblem -->
+        <img data-layer="SNSCT 1" style="width: 106px; height: 106px; left: 3px; top: 7px; position: absolute"
+            src="/assets/images/sns_emblem.png" alt="SNS Emblem" />
+
+        <!-- Blended Texperia Logo (Center) -->
+        <img data-layer="image 2" style="width: 647px; height: 458px; left: 83px; top: -46px; position: absolute"
+            src="/assets/images/texperia_logo.png" alt="Texperia Logo" />
+
+        <!-- SNS Institutions Logo -->
+        <img data-layer="SNS Institutions Logo 1"
+            style="width: 157px; height: 110px; left: 632px; top: 6px; position: absolute"
+            src="/assets/images/SNS_institutions_logo.png" alt="SNS Institutions" />
+
+        <!-- Title -->
+        <div data-layer="Lunch Token"
+            style="width: 295px; height: 52px; left: 260px; top: 305px; position: absolute; color: black; font-size: 32px; font-family: 'Gelasio', serif; font-weight: 600; word-wrap: break-word; text-align: center">
+            Lunch Token</div>
+
+        <!-- Labels -->
+        <div data-layer="Student Details :"
+            style="width: 250px; height: 31px; left: 64px; top: 373px; position: absolute; color: black; font-size: 24px; font-family: 'Gabriela', serif; font-weight: 400; word-wrap: break-word">
+            Participant Details :</div>
+
+        <div data-layer="Venue Details :"
+            style="width: 225px; height: 31px; left: 64px; top: 531px; position: absolute; color: black; font-size: 24px; font-family: 'Gabriela', serif; font-weight: 400; word-wrap: break-word">
+            Venue Details :</div>
+
+        <div data-layer="Lunch QR Code"
+            style="width: 259px; height: 31px; left: 281px; top: 691px; position: absolute; color: black; font-size: 24px; font-family: 'Gabriela', serif; font-weight: 400; word-wrap: break-word; text-align: center">
+            Lunch QR Code</div>
+
+        <!-- Vertical Markers -->
+        <div style="left: 56px; top: 351px; position: absolute">
+            <svg width="6" height="49" viewBox="0 0 6 49" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="6" height="49" fill="#FFB909" />
+            </svg>
+        </div>
+        <div style="left: 56px; top: 511px; position: absolute">
+            <svg width="6" height="49" viewBox="0 0 6 49" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="6" height="49" fill="#FFB909" />
+            </svg>
+        </div>
+
+        <!-- Dynamic Content: Participant Details -->
+        <div data-layer="Details Content"
+            style="width: 650px; left: 142px; top: 412px; position: absolute; color: black; font-size: 24px; font-family: 'Gabriela', serif; font-weight: 400; word-wrap: break-word; line-height: 1.5">
+            Name: {{name}} | College: {{college}}
+        </div>
+
+        <!-- Dynamic Content: Venue/Event -->
+        <div data-layer="Venue Content"
+            style="width: 600px; left: 142px; top: 570px; position: absolute; color: black; font-size: 24px; font-family: 'Gabriela', serif; font-weight: 400; word-wrap: break-word; line-height: 1.5">
+            Event : {{event}}<br />
+            Venue : {{venue}}
+        </div>
+
+        <!-- QR Code Image -->
+        <div style="left: 297px; top: 740px; position: absolute; width: 220px; height: 220px; border: 1px solid #eee">
+            <img src="{{qrCode}}" style="width: 100%; height: 100%" alt="QR Code">
+        </div>
+    </div>
+</body>
+
+</html>
