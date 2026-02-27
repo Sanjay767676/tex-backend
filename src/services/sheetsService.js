@@ -439,24 +439,35 @@ const warmupCache = async () => {
 
     const allSheetIds = [
         ...Object.values(env.csSheets),
-        ...Object.values(env.ncsSheets)
-    ];
+        ...Object.values(env.ncsSheets),
+        env.testSheetId
+    ].filter(id => id && id.trim() !== '');
+
+    let totalTokens = 0;
 
     for (const spreadsheetId of allSheetIds) {
         try {
-            const { headers, pending, sheetTitle } = await getPendingPayments(spreadsheetId);
             const { headerMap } = await getHeaderInfo(spreadsheetId);
+            const cachedMetadata = metadataCache.get(spreadsheetId);
+            const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
+
             const tokenIdx = getColumnByAlias(headerMap, 'token');
             const attendanceIdx = getColumnByAlias(headerMap, 'attendance');
+            const lunchIdx = getColumnByAlias(headerMap, 'lunch');
 
             if (tokenIdx === -1) continue;
 
             const rows = await getSheetRows(spreadsheetId, `'${sheetTitle}'!${SHEET_NAME}`);
             if (rows.length < 2) continue;
 
+            const headers = rows[0];
+
             rows.slice(1).forEach((row, index) => {
                 const token = normalizeValue(row[tokenIdx]);
                 if (token && isValidToken(token)) {
+                    const attendanceVal = attendanceIdx !== -1 ? normalizeValue(row[attendanceIdx]).toUpperCase() : '';
+                    const lunchVal = lunchIdx !== -1 ? normalizeValue(row[lunchIdx]).toUpperCase() : '';
+
                     cacheService.set(token, {
                         spreadsheetId,
                         rowIndex: index + 2,
@@ -464,8 +475,10 @@ const warmupCache = async () => {
                         headerMap,
                         sheetTitle,
                         row,
-                        attendance: normalizeValue(row[attendanceIdx]).toUpperCase() === 'PRESENT'
+                        attendance: attendanceVal === 'PRESENT',
+                        lunch: ['PRESENT', 'SCANNED', 'TRUE', 'TAKEN'].includes(lunchVal) || (lunchVal !== '' && lunchVal !== 'ABSENT' && lunchVal !== 'FALSE')
                     });
+                    totalTokens++;
                 }
             });
         } catch (err) {
@@ -473,7 +486,7 @@ const warmupCache = async () => {
         }
     }
 
-    console.log(`[Sheets Service] ✅ Cache warmed up. Mode: ${cacheService.isRedis ? 'Redis' : 'Memory'}`);
+    console.log(`[Sheets Service] ✅ Cache warmed up. Total tokens loaded: ${totalTokens}`);
     isCacheWarming = false;
 };
 
@@ -523,9 +536,32 @@ const findRowByToken = async (spreadsheetId, token) => {
     return null;
 };
 
-const markAttendancePresent = async (spreadsheetId, rowIndex, headers, headerMap, sheetTitle) => {
-    validateRequiredColumns(headers, headerMap, ['attendance']);
-    await updateRowColumns(spreadsheetId, rowIndex, { attendance: 'PRESENT' }, headers, headerMap, sheetTitle);
+const markAttendancePresent = async (spreadsheetId, rowIndex, headers, headerMap, sheetTitle, token) => {
+    try {
+        validateRequiredColumns(headers, headerMap, ['attendance']);
+        await updateRowColumns(spreadsheetId, rowIndex, { attendance: 'PRESENT' }, headers, headerMap, sheetTitle);
+    } catch (error) {
+        console.warn(`[Sheets Service] Failed to update attendance for ${token}, retrying once...`);
+        try {
+            await updateRowColumns(spreadsheetId, rowIndex, { attendance: 'PRESENT' }, headers, headerMap, sheetTitle);
+        } catch (retryError) {
+            console.error(`[Sheets Service] Persistent failure updating attendance for ${token}:`, retryError.message);
+        }
+    }
+};
+
+const markLunchPresent = async (spreadsheetId, rowIndex, headers, headerMap, sheetTitle, token) => {
+    try {
+        validateRequiredColumns(headers, headerMap, ['lunch']);
+        await updateRowColumns(spreadsheetId, rowIndex, { lunch: 'TAKEN' }, headers, headerMap, sheetTitle);
+    } catch (error) {
+        console.warn(`[Sheets Service] Failed to update lunch for ${token}, retrying once...`);
+        try {
+            await updateRowColumns(spreadsheetId, rowIndex, { lunch: 'TAKEN' }, headers, headerMap, sheetTitle);
+        } catch (retryError) {
+            console.error(`[Sheets Service] Persistent failure updating lunch for ${token}:`, retryError.message);
+        }
+    }
 };
 
 const handleScan = async (token) => {
@@ -540,50 +576,50 @@ const handleScan = async (token) => {
     const senderType = normalizedToken.toUpperCase().startsWith('NCS-') ? 'NCS' : 'CS';
     const sheetIds = senderType === 'NCS' ? Object.values(env.ncsSheets) : Object.values(env.csSheets);
 
-    let rowInfo = null;
-    let spreadsheetIdFound = null;
+    // Add testing sheet to search path
+    if (env.testSheetId) sheetIds.push(env.testSheetId);
 
-    for (const id of sheetIds) {
-        rowInfo = await findRowByToken(id, normalizedToken);
-        if (rowInfo) {
-            spreadsheetIdFound = rowInfo.spreadsheetId || id;
-            break;
+    // 1. FAST LOOKUP VIA CACHE
+    let rowInfo = await cacheService.get(normalizedToken);
+
+    // 2. FALLBACK LOOKUP IF NOT IN CACHE
+    if (!rowInfo) {
+        for (const id of sheetIds) {
+            rowInfo = await findRowByToken(id, normalizedToken);
+            if (rowInfo) {
+                rowInfo.spreadsheetId = rowInfo.spreadsheetId || id;
+                break;
+            }
         }
     }
 
     if (!rowInfo) {
-        const error = new Error('Token not found');
+        const error = new Error('Token not found or not approved');
         error.statusCode = 400;
         throw error;
     }
 
-    const { rowIndex, headers, headerMap, attendance, row: cachedRow } = rowInfo;
-    const spreadsheetId = spreadsheetIdFound;
+    const { rowIndex, headers, headerMap, attendance, sheetTitle, spreadsheetId } = rowInfo;
 
-    // Use cached row data if available, otherwise fetch once
-    const row = cachedRow || await getRowByIndex(spreadsheetId, rowIndex, headers, rowInfo.sheetTitle);
-
-    const attendanceIdx = getColumnByAlias(headerMap, 'attendance');
-    const nameIdx = getColumnByAlias(headerMap, 'name');
-    const emailIdx = getColumnByAlias(headerMap, 'email');
-
-    // Check if already present from cache or row data
-    if (attendance === true || (attendanceIdx !== -1 && normalizeValue(row[attendanceIdx]).toUpperCase() === 'PRESENT')) {
+    // 3. CHECK STATUS (Memory-First)
+    if (attendance === true) {
         const error = new Error('Attendance already marked');
         error.statusCode = 409;
         throw error;
     }
 
-    // UPDATE LOCAL CACHE IMMEDIATELY
-    const cached = await cacheService.get(normalizedToken);
-    if (cached) {
-        cached.attendance = true;
-        await cacheService.set(normalizedToken, cached);
-    }
+    // 4. UPDATE MEMORY IMMEDIATELY
+    rowInfo.attendance = true;
+    await cacheService.set(normalizedToken, rowInfo);
 
-    // PUSH TO SHEETS IN BACKGROUND (Don't await)
-    markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap, rowInfo.sheetTitle)
-        .catch(err => console.error(`[Sheets Service] Background update failed for ${normalizedToken}:`, err.message));
+    // 5. UPDATE SHEETS ASYNC (Single Instance Safety)
+    markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
+        .catch(err => console.error(`[Sheets Service] Critical background update failure for ${normalizedToken}:`, err.message));
+
+    // 6. SEND EMAIL ASYNC
+    const nameIdx = getColumnByAlias(headerMap, 'name');
+    const emailIdx = getColumnByAlias(headerMap, 'email');
+    const row = rowInfo.row || await getRowByIndex(spreadsheetId, rowIndex, headers, sheetTitle);
 
     const studentEmail = emailIdx === -1 ? '' : normalizeValue(row[emailIdx]);
     const studentName = nameIdx === -1 ? 'Student' : normalizeValue(row[nameIdx]) || 'Student';
@@ -605,6 +641,61 @@ const handleScan = async (token) => {
     return { rowIndex, senderType };
 };
 
+const handleLunchScan = async (token) => {
+    const normalizedToken = normalizeValue(token);
+
+    if (!isValidToken(normalizedToken)) {
+        const error = new Error('Invalid token format');
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const senderType = normalizedToken.toUpperCase().startsWith('NCS-') ? 'NCS' : 'CS';
+    const sheetIds = senderType === 'NCS' ? Object.values(env.ncsSheets) : Object.values(env.csSheets);
+
+    // Add testing sheet to search path
+    if (env.testSheetId) sheetIds.push(env.testSheetId);
+
+    // 1. FAST LOOKUP VIA CACHE
+    let rowInfo = await cacheService.get(normalizedToken);
+
+    // 2. FALLBACK LOOKUP
+    if (!rowInfo) {
+        for (const id of sheetIds) {
+            rowInfo = await findRowByToken(id, normalizedToken);
+            if (rowInfo) {
+                rowInfo.spreadsheetId = rowInfo.spreadsheetId || id;
+                break;
+            }
+        }
+    }
+
+    if (!rowInfo) {
+        const error = new Error('Token not found or not approved');
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const { rowIndex, headers, headerMap, lunch, sheetTitle, spreadsheetId } = rowInfo;
+
+    // 3. CHECK LUNCH STATUS
+    if (lunch === true) {
+        const error = new Error('Lunch already scanned');
+        error.statusCode = 409;
+        throw error;
+    }
+
+    // 4. UPDATE MEMORY IMMEDIATELY
+    rowInfo.lunch = true;
+    await cacheService.set(normalizedToken, rowInfo);
+
+    // 5. UPDATE SHEETS ASYNC
+    markLunchPresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
+        .catch(err => console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message));
+
+    return { rowIndex, senderType };
+};
+
 module.exports = {
     getSheetRows,
     getPendingPayments,
@@ -615,4 +706,5 @@ module.exports = {
     buildToken,
     isValidToken,
     handleScan,
+    handleLunchScan,
 };

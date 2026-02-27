@@ -11,6 +11,7 @@
 const columnAliases = {
     // Student name column variations
     name: [
+        'Name :',
         'Name of the Student :',
         'Name of the Student',
         'Student Name',
@@ -115,14 +116,27 @@ const columnAliases = {
         'Year & Dept',
         'Year and Department',
     ],
+
     // College column variations
     college: [
+        'College :',
         'College Name',
         'College',
         'Name of the College',
         'Institute',
         'Institution Name',
         'College/Institute',
+    ],
+
+    // Lunch column variations
+    lunch: [
+        'LunchStatus',
+        'Lunch Status',
+        'Lunch_Status',
+        'Lunch',
+        'Lunch_QR_Link',
+        'Lunch_Mark',
+        'Lunch QR Scan',
     ],
 };
 

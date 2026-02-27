@@ -18,6 +18,21 @@ const required = [
     'NCS_EMAIL_PASS',
 ];
 
+const fs = require('fs');
+
+// Automatically load service account credentials if missing
+if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON && process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    try {
+        const keyPath = path.join(__dirname, '../../', process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+        if (fs.existsSync(keyPath)) {
+            process.env.GOOGLE_SERVICE_ACCOUNT_JSON = fs.readFileSync(keyPath, 'utf8');
+            console.log('[Env] Loaded service account credentials from file');
+        }
+    } catch (err) {
+        console.error('[Env] Failed to load service account key file:', err.message);
+    }
+}
+
 const validateEnv = () => {
     const missing = required.filter((key) => !process.env[key] || String(process.env[key]).trim() === '');
     if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON || String(process.env.GOOGLE_SERVICE_ACCOUNT_JSON).trim() === '') {
@@ -45,6 +60,7 @@ const env = {
     csEmailPass: String(process.env.CS_EMAIL_PASS || '').trim(),
     ncsEmailUser: String(process.env.NCS_EMAIL_USER || '').trim(),
     ncsEmailPass: String(process.env.NCS_EMAIL_PASS || '').trim(),
+    testSheetId: String(process.env.TEST_SHEET_ID || '').trim(),
 };
 
 module.exports = {
