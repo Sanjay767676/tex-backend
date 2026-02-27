@@ -3,6 +3,7 @@ node_modules/
 *.json
 !package.json
 !package-lock.json
+!eventConfig.json
 .pdf
 # Test/debug files
 test-*.js
