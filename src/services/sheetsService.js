@@ -626,16 +626,16 @@ const handleScan = async (token) => {
 
     if (studentEmail) {
         const { day1Events, day2Events } = extractEvents(row, headers);
-        generateQRCode(normalizedToken).then(({ scanUrl }) => {
+        generateQRCode(normalizedToken).then(({ qrBase64 }) => {
             return sendAttendanceEmail({
                 senderType,
                 to: studentEmail,
                 name: studentName,
                 day1Events,
                 day2Events,
-                scanUrl,
+                qrBase64,
             });
-        }).catch(() => { });
+        }).catch((err) => console.error('[Sheets Service] Failed to send attendance email:', err.message));
     }
 
     return { rowIndex, senderType };

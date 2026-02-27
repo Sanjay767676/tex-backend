@@ -97,13 +97,9 @@ const renderEmailTemplate = ({
     title,
     greeting,
     message,
-    day1Events,
-    day2Events,
-    scanUrl,
+    eventsHtml,
+    qrCid,
 }) => {
-    const day1Html = renderEventList(day1Events);
-    const day2Html = renderEventList(day2Events);
-
     return `
         <!DOCTYPE html>
         <html>
@@ -111,125 +107,133 @@ const renderEmailTemplate = ({
             <meta charset="utf-8">
             <style>
                 body {
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
                     line-height: 1.6;
-                    color: #333;
-                    background-color: #f4f4f4;
+                    color: #2c3e50;
                     margin: 0;
                     padding: 0;
+                    background-color: #f8f9fa;
+                }
+                .wrapper {
+                    background-color: #f8f9fa;
+                    padding: 40px 20px;
                 }
                 .container {
                     max-width: 600px;
-                    margin: 20px auto;
+                    margin: 0 auto;
                     background-color: #ffffff;
-                    padding: 30px;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                    border-radius: 12px;
+                    overflow: hidden;
+                    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
                 }
                 .header {
+                    background-color: #4CAF50;
+                    color: #ffffff;
+                    padding: 40px 20px;
                     text-align: center;
-                    border-bottom: 3px solid #4CAF50;
-                    padding-bottom: 20px;
-                    margin-bottom: 20px;
                 }
                 .header h1 {
-                    color: #4CAF50;
                     margin: 0;
-                    font-size: 28px;
+                    font-size: 32px;
+                    letter-spacing: 1px;
+                }
+                .header p {
+                    margin: 10px 0 0;
+                    font-size: 18px;
+                    opacity: 0.9;
+                }
+                .content {
+                    padding: 40px 30px;
                 }
                 .greeting {
-                    font-size: 16px;
-                    margin: 20px 0;
+                    font-size: 20px;
+                    font-weight: bold;
+                    margin-bottom: 20px;
                     color: #333;
                 }
-                .section {
-                    margin-bottom: 25px;
-                }
-                .section h3 {
-                    color: #4CAF50;
-                    border-left: 4px solid #4CAF50;
-                    padding-left: 10px;
-                    margin-top: 0;
-                }
-                .section ul {
-                    list-style-type: none;
-                    padding-left: 0;
-                    margin: 10px 0;
-                }
-                .section li {
-                    padding: 8px 0;
-                    padding-left: 20px;
-                    position: relative;
+                .message {
+                    font-size: 16px;
                     color: #555;
+                    margin-bottom: 30px;
                 }
-                .section li:before {
-                    content: "✓";
-                    position: absolute;
-                    left: 0;
-                    color: #4CAF50;
-                    font-weight: bold;
+                .events-section {
+                    background-color: #f1f8e9;
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin-bottom: 30px;
+                }
+                .events-section h3 {
+                    margin-top: 0;
+                    color: #2e7d32;
+                    font-size: 18px;
+                    border-bottom: 1px solid #c8e6c9;
+                    padding-bottom: 10px;
                 }
                 .qr-section {
                     text-align: center;
-                    background-color: #f9f9f9;
+                    margin: 40px 0;
                     padding: 20px;
-                    border-radius: 6px;
-                    margin: 20px 0;
-                }
-                .qr-section p {
-                    color: #666;
-                    margin: 10px 0;
-                    font-size: 14px;
+                    border: 2px dashed #4CAF50;
+                    border-radius: 12px;
                 }
                 .qr-section img {
-                    border: 2px solid #4CAF50;
-                    border-radius: 4px;
-                    margin: 10px 0;
+                    display: block;
+                    margin: 0 auto 15px;
                 }
                 .footer {
+                    background-color: #f1f3f5;
+                    padding: 30px;
                     text-align: center;
-                    padding-top: 20px;
-                    border-top: 1px solid #eee;
-                    color: #999;
-                    font-size: 12px;
-                    margin-top: 30px;
+                    color: #6c757d;
+                    font-size: 13px;
                 }
-                .footer p {
-                    margin: 5px 0;
+                .footer p { margin: 5px 0; }
+                .button {
+                    display: inline-block;
+                    padding: 12px 24px;
+                    background-color: #4CAF50;
+                    color: #ffffff;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    margin: 20px 0;
                 }
             </style>
         </head>
         <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Texperia 2026</h1>
-                    <p>${title}</p>
-                </div>
+            <div class="wrapper">
+                <div class="container">
+                    <div class="header">
+                        <h1>Texperia 2026</h1>
+                        <p>${title}</p>
+                    </div>
 
-                <div class="greeting">
-                    <p>${greeting}</p>
-                    <p>${message}</p>
-                </div>
+                    <div class="content">
+                        <div class="greeting">${greeting}</div>
+                        <div class="message">${message}</div>
 
-                <div class="qr-section">
-                    <p><strong>Your Entry QR Code</strong></p>
-                        <img src="${scanUrl}" width="200" alt="QR Code" />
-                    <p>Show this QR code during event entry</p>
-                </div>
+                        ${eventsHtml ? `
+                        <div class="events-section">
+                            <h3>Registered Events</h3>
+                            ${eventsHtml}
+                        </div>
+                        ` : ''}
 
-                <div class="section">
-                    <h3>Day 1 Events</h3>
-                    ${day1Html}
-                </div>
+                        ${qrCid ? `
+                        <div class="qr-section">
+                            <p style="font-weight: bold; color: #4CAF50; margin-bottom: 15px;">Official Entry QR Pass</p>
+                            <img src="cid:${qrCid}" width="200" height="200" alt="QR Code" />
+                            <p style="font-size: 12px; color: #888;">Keep this QR code ready at the entrance gate.</p>
+                        </div>
+                        ` : ''}
 
-                <div class="section">
-                    <h3>Day 2 Events</h3>
-                    ${day2Html}
-                </div>
+                        <p>Best regards,<br><strong>Texperia Organizing Team</strong></p>
+                    </div>
 
-                <div class="footer">
-                    <p>© 2026 Texperia. All rights reserved.</p>
-                    <p>If you have any questions, please contact us at support@texperia.com</p>
+                    <div class="footer">
+                        <p>© 2026 Texperia at SNS College of Technology.</p>
+                        <p>This is an automated system email. Please do not reply.</p>
+                    </div>
                 </div>
             </div>
         </body>
@@ -245,52 +249,37 @@ const sendConfirmationEmail = async ({
     pdfBuffer
 }) => {
     const transporter = await getTransporter(senderType);
+    const fromName = senderType === 'NCS' ? 'Texperia NCS Team' : 'Texperia CS Team';
+    const fromEmail = senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER;
 
-    const htmlBody = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body { font-family: sans-serif; line-height: 1.6; color: #333; }
-                .container { max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
-                .footer { margin-top: 30px; font-size: 12px; color: #777; border-top: 1px solid #eee; padding-top: 10px; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h2>Texperia 2026 Registration Confirmed</h2>
-                <p>Hi <strong>${name}</strong>,</p>
-                <p>Your Texperia 2026 registration is confirmed.</p>
-                <p>Please find your <strong>Registration Pass</strong> attached to this email as a PDF.</p>
-                <p><strong>Carry this PDF (digital or printed) to the venue.</strong> Your QR code inside the PDF will be scanned at entry.</p>
-                <p>Best Regards,<br>Texperia Team</p>
-                
-                <div class="footer">
-                    <p>© 2026 Texperia. All rights reserved.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-    `;
+    const htmlBody = renderEmailTemplate({
+        title: 'Registration Successful',
+        greeting: `Hi ${name},`,
+        message: 'Your registration for Texperia 2026 has been successfully confirmed. We have attached your official registration pass to this email.',
+    });
 
     const mailOptions = {
-        from: senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER,
+        from: `"${fromName}" <${fromEmail}>`,
         to,
-        subject: 'Texperia 2026 Registration Confirmed',
+        subject: 'Texperia 2026 Registration Confirmed ✓',
         html: htmlBody,
         attachments: [
             {
                 filename: `Texperia_Pass_${token}.pdf`,
                 content: pdfBuffer,
             }
-        ]
+        ],
+        headers: {
+            'X-Priority': '1 (Highest)',
+            'X-MSMail-Priority': 'High',
+            'Importance': 'high'
+        }
     };
 
     try {
         console.log(`[Email Service] Sending registration pass to: ${to}`);
         const info = await transporter.sendMail(mailOptions);
-        console.log(`[Email Service] Email sent successfully: ${info.response}`);
+        console.log(`[Email Service] Email sent: ${info.response}`);
         return true;
     } catch (error) {
         console.error('[Email Service] Error sending registration email:', error);
@@ -304,112 +293,52 @@ const sendAttendanceEmail = async ({
     name,
     day1Events,
     day2Events,
+    qrBase64
 }) => {
     const transporter = await getTransporter(senderType);
-    
-    // Format events list
+    const fromName = senderType === 'NCS' ? 'Texperia NCS Team' : 'Texperia CS Team';
+    const fromEmail = senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER;
+
     const allEvents = [...day1Events, ...day2Events];
-    const eventsList = allEvents.length > 0 ? allEvents.join(', ') : 'Registered Events';
-    
-    const htmlBody = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body {
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                    background-color: #f4f4f4;
-                    margin: 0;
-                    padding: 0;
-                }
-                .container {
-                    max-width: 600px;
-                    margin: 20px auto;
-                    background-color: #ffffff;
-                    padding: 30px;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                }
-                .header {
-                    text-align: center;
-                    border-bottom: 3px solid #4CAF50;
-                    padding-bottom: 20px;
-                    margin-bottom: 20px;
-                }
-                .header h1 {
-                    color: #4CAF50;
-                    margin: 0;
-                    font-size: 28px;
-                }
-                .content {
-                    font-size: 16px;
-                    margin: 20px 0;
-                    color: #333;
-                    line-height: 1.8;
-                }
-                .highlight {
-                    color: #4CAF50;
-                    font-weight: bold;
-                }
-                .footer {
-                    text-align: center;
-                    padding-top: 20px;
-                    border-top: 1px solid #eee;
-                    color: #999;
-                    font-size: 12px;
-                    margin-top: 30px;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Texperia 2026</h1>
-                </div>
-                
-                <div class="content">
-                    <p>Hi <span class="highlight">${name}</span>,</p>
-                    
-                    <p>Your <span class="highlight">attendance has been confirmed</span> for Texperia 2026!</p>
-                    
-                    <p><strong>Registered Events:</strong><br>${eventsList}</p>
-                    
-                    <p style="background-color: #f0f8f0; padding: 15px; border-left: 4px solid #4CAF50; margin: 20px 0;">
-                        <strong>Please reach out to your designated venue ASAP!</strong><br>
-                        Venue details will be shared separately. Make sure to arrive on time.
-                    </p>
-                    
-                    <p>Thank you for registering with us. We look forward to seeing you!</p>
-                    
-                    <p>Best regards,<br><strong>Texperia Team</strong></p>
-                </div>
-                
-                <div class="footer">
-                    <p>This is an automated email. Please do not reply.</p>
-                    <p>&copy; 2026 Texperia. All rights reserved.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-    `;
+    const eventsHtml = allEvents.length > 0
+        ? `<ul style="padding-left: 20px;">${allEvents.map(e => `<li>${e}</li>`).join('')}</ul>`
+        : '<p>Standard Admission</p>';
+
+    const qrCid = 'entry-qr-code';
+    const htmlBody = renderEmailTemplate({
+        title: 'Attendance Confirmed',
+        greeting: `Welcome, ${name}!`,
+        message: 'Your attendance has been officially marked. You are cleared to participate in the events listed below. Enjoy Texperia 2026!',
+        eventsHtml,
+        qrCid
+    });
 
     const mailOptions = {
-        from: senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER,
+        from: `"${fromName}" <${fromEmail}>`,
         to,
         subject: 'Texperia 2026 - Attendance Confirmed ✓',
         html: htmlBody,
+        attachments: qrBase64 ? [
+            {
+                filename: 'qr-code.png',
+                content: qrBase64.split('base64,')[1],
+                encoding: 'base64',
+                cid: qrCid
+            }
+        ] : [],
+        headers: {
+            'X-Priority': '1 (Highest)',
+            'Importance': 'high'
+        }
     };
 
     try {
-        console.log('Preparing to send attendance email to:', to);
+        console.log(`[Email Service] Sending attendance confirmation to: ${to}`);
         const info = await transporter.sendMail(mailOptions);
-        console.log('Attendance email sent successfully:', info.response);
+        console.log(`[Email Service] Attendance email sent: ${info.response}`);
         return true;
     } catch (error) {
-        console.error('EMAIL ERROR:', error.message);
+        console.error('[Email Service] Attendance email error:', error.message);
         return false;
     }
 };
