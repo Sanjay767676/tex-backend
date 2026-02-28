@@ -5,6 +5,7 @@ const connectionRoutes = require('./routes/connectionRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const scanRoutes = require('./routes/scanRoutes');
 const previewRoutes = require('./routes/previewRoutes');
+const debugRoutes = require('./routes/debugRoutes');
 
 const app = express();
 
@@ -19,11 +20,8 @@ app.use(express.json());
 // Serve static assets for templates
 app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'OK' });
-});
-
 // Mount routes
+app.use('/', debugRoutes); // Health and debug endpoints
 app.use('/', scanRoutes);
 app.use('/', connectionRoutes);
 app.use('/', paymentRoutes);

@@ -16,22 +16,55 @@ const scanLimiter = rateLimit({
 });
 
 router.post('/scan', scanLimiter, async (req, res) => {
-    try {
-        const token = req.body && req.body.token ? String(req.body.token).trim() : '';
-        if (!token) {
-            return res.status(400).json({ error: 'Token is required' });
-        }
+    const token = req.body && req.body.token ? String(req.body.token).trim() : '';
+    
+    // Enhanced logging
+    console.log(`[Scan API] POST request - Token: ${token || 'MISSING'}`);
+    console.log(`[Scan API] Request headers:`, {
+        userAgent: req.headers['user-agent'],
+        contentType: req.headers['content-type'],
+        origin: req.headers.origin
+    });
+    
+    if (!token) {
+        console.log(`[Scan API] ❌ Missing token in request body`);
+        return res.status(400).json({ 
+            status: "error",
+            message: "Token is required in request body",
+            code: "MISSING_TOKEN"
+        });
+    }
 
+    try {
+        console.log(`[Scan API] Processing token: ${token}`);
         const result = await handleScan(token);
+        
+        console.log(`[Scan API] ✅ Success - Row: ${result.rowIndex}, Type: ${result.senderType}`);
+        
         return res.json({
             status: 'ok',
-            rowIndex: result.rowIndex,
-            senderType: result.senderType,
+            message: 'Attendance marked successfully',
+            data: {
+                rowIndex: result.rowIndex,
+                senderType: result.senderType,
+                timestamp: new Date().toISOString()
+            }
         });
     } catch (error) {
         const statusCode = error.statusCode || 500;
+        console.error(`[Scan API] ❌ Error - Status: ${statusCode}, Message: ${error.message}`);
+        console.error(`[Scan API] 🔍 Error details:`, {
+            code: error.code,
+            stack: error.stack?.split('\n')[0],
+            token: token
+        });
+        
         return res.status(statusCode).json({
-            error: error.message || 'Scan failed',
+            status: "error",
+            message: error.message || 'Scan processing failed',
+            code: error.statusCode === 409 ? "ALREADY_SCANNED" : 
+                  error.statusCode === 400 ? "INVALID_TOKEN" : 
+                  "SYSTEM_ERROR"
         });
     }
 });
@@ -102,22 +135,55 @@ router.get('/scan', async (req, res) => {
 });
 
 router.post('/lunch', scanLimiter, async (req, res) => {
-    try {
-        const token = req.body && req.body.token ? String(req.body.token).trim() : '';
-        if (!token) {
-            return res.status(400).json({ error: 'Token is required' });
-        }
+    const token = req.body && req.body.token ? String(req.body.token).trim() : '';
+    
+    // Enhanced logging
+    console.log(`[Lunch API] POST request - Token: ${token || 'MISSING'}`);
+    console.log(`[Lunch API] Request headers:`, {
+        userAgent: req.headers['user-agent'],
+        contentType: req.headers['content-type'],
+        origin: req.headers.origin
+    });
+    
+    if (!token) {
+        console.log(`[Lunch API] ❌ Missing token in request body`);
+        return res.status(400).json({ 
+            status: "error",
+            message: "Token is required in request body",
+            code: "MISSING_TOKEN"
+        });
+    }
 
+    try {
+        console.log(`[Lunch API] Processing token: ${token}`);
         const result = await handleLunchScan(token);
+        
+        console.log(`[Lunch API] ✅ Success - Row: ${result.rowIndex}, Type: ${result.senderType}`);
+        
         return res.json({
             status: 'ok',
-            rowIndex: result.rowIndex,
-            senderType: result.senderType,
+            message: 'Lunch marked successfully',
+            data: {
+                rowIndex: result.rowIndex,
+                senderType: result.senderType,
+                timestamp: new Date().toISOString()
+            }
         });
     } catch (error) {
         const statusCode = error.statusCode || 500;
+        console.error(`[Lunch API] ❌ Error - Status: ${statusCode}, Message: ${error.message}`);
+        console.error(`[Lunch API] 🔍 Error details:`, {
+            code: error.code,
+            stack: error.stack?.split('\n')[0],
+            token: token
+        });
+        
         return res.status(statusCode).json({
-            error: error.message || 'Lunch scan failed',
+            status: "error",
+            message: error.message || 'Lunch scan processing failed',
+            code: error.statusCode === 409 ? "ALREADY_SCANNED" : 
+                  error.statusCode === 400 ? "INVALID_TOKEN" : 
+                  "SYSTEM_ERROR"
         });
     }
 });

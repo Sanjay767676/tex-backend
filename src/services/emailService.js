@@ -9,236 +9,226 @@ let gmailIPv4 = null;
 let csTransporter = null;
 let ncsTransporter = null;
 
+/**
+ * Resolve Gmail SMTP IPv4 address once and cache it
+ */
 const resolveGmailIPv4 = async () => {
     if (gmailIPv4) return gmailIPv4;
+
     try {
         const addresses = await resolve4('smtp.gmail.com');
         gmailIPv4 = addresses[0];
         console.log(`[SMTP] Resolved smtp.gmail.com → ${gmailIPv4}`);
         return gmailIPv4;
-    } catch (err) {
-        console.error('[SMTP] DNS resolve failed, falling back to hostname:', err.message);
+    } catch (error) {
+        console.warn('[SMTP] Gmail IPv4 resolution failed, using hostname');
         return 'smtp.gmail.com';
     }
 };
 
-const buildSmtpConfig = (host) => ({
-    host,
-    port: 465,
-    secure: true,
-    connectionTimeout: 30000,
-    greetingTimeout: 20000,
-    socketTimeout: 30000,
-    tls: {
-        rejectUnauthorized: false,
-        servername: 'smtp.gmail.com',
-    },
-});
+/**
+ * Enhanced transporter creation with IPv4 resolution
+ */
+const createTransporter = async (user, pass, label) => {
+    const host = await resolveGmailIPv4();
 
-const getCSTransporter = async () => {
-    if (csTransporter) return csTransporter;
-    const ip = await resolveGmailIPv4();
-    csTransporter = nodemailer.createTransport({
-        ...buildSmtpConfig(ip),
-        auth: {
-            user: process.env.CS_EMAIL_USER,
-            pass: process.env.CS_EMAIL_PASS,
-        },
+    const transporter = nodemailer.createTransport({
+        host,
+        port: 465,
+        secure: true,
+        auth: { user, pass },
+        connectionTimeout: 30000,
+        greetingTimeout: 15000,
+        socketTimeout: 45000,
+        logger: false,
+        debug: false,
+        pool: true,
+        maxConnections: 5,
+        maxMessages: 50,
+        rateLimit: 10,
+        rateDelta: 1000,
     });
-    return csTransporter;
+
+    // Test connection
+    try {
+        await transporter.verify();
+        console.log(`[SMTP] ${label} Ready (port 465, IPv4)`);
+        return transporter;
+    } catch (error) {
+        console.error(`[SMTP] ${label} Connection Failed:`, error.message);
+        throw error;
+    }
 };
 
-const getNCSTransporter = async () => {
-    if (ncsTransporter) return ncsTransporter;
-    const ip = await resolveGmailIPv4();
-    ncsTransporter = nodemailer.createTransport({
-        ...buildSmtpConfig(ip),
-        auth: {
-            user: process.env.NCS_EMAIL_USER,
-            pass: process.env.NCS_EMAIL_PASS,
-        },
-    });
-    return ncsTransporter;
-};
-
-// Verify on startup (non-blocking)
-(async () => {
-    try {
-        const cs = await getCSTransporter();
-        await cs.verify();
-        console.log('[SMTP] CS Ready (port 465, IPv4)');
-    } catch (err) {
-        console.error('[SMTP] CS verify failed:', err.message);
-    }
-    try {
-        const ncs = await getNCSTransporter();
-        await ncs.verify();
-        console.log('[SMTP] NCS Ready (port 465, IPv4)');
-    } catch (err) {
-        console.error('[SMTP] NCS verify failed:', err.message);
-    }
-})();
-
+/**
+ * Get or create transporter for sender type
+ */
 const getTransporter = async (senderType) => {
-    const type = String(senderType || '').toUpperCase();
-    if (type === 'NCS') return getNCSTransporter();
-    if (type === 'CS') return getCSTransporter();
-    throw new Error(`Unknown sender type: ${senderType}`);
-};
+    const isNCS = senderType === 'NCS';
 
-const renderEventList = (events) => {
-    if (!events || events.length === 0) {
-        return '<p><em>No events selected</em></p>';
+    if (isNCS && !ncsTransporter) {
+        ncsTransporter = await createTransporter(
+            process.env.NCS_EMAIL_USER,
+            process.env.NCS_EMAIL_PASS,
+            'NCS'
+        );
+    } else if (!isNCS && !csTransporter) {
+        csTransporter = await createTransporter(
+            process.env.CS_EMAIL_USER,
+            process.env.CS_EMAIL_PASS,
+            'CS'
+        );
     }
-    return `<ul>${events.map((event) => `<li>${event}</li>`).join('')}</ul>`;
+
+    return isNCS ? ncsTransporter : csTransporter;
 };
 
+/**
+ * Enhanced email template with plain text version for spam prevention
+ * - Proper HTML structure with meta viewport
+ * - Plain text fallback
+ * - Clean subject lines (no spam trigger words)
+ * - Proper replyTo headers
+ * - List-Unsubscribe header
+ */
 const renderEmailTemplate = ({
     title,
     greeting,
     message,
-    eventsHtml,
+    eventsHtml = '',
     qrCid,
+    plainTextMessage = null
 }) => {
-    return `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body {
-                    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-                    line-height: 1.6;
-                    color: #2c3e50;
-                    margin: 0;
-                    padding: 0;
-                    background-color: #f8f9fa;
-                }
-                .wrapper {
-                    background-color: #f8f9fa;
-                    padding: 40px 20px;
-                }
-                .container {
-                    max-width: 600px;
-                    margin: 0 auto;
-                    background-color: #ffffff;
-                    border-radius: 12px;
-                    overflow: hidden;
-                    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-                }
-                .header {
-                    background-color: #4CAF50;
-                    color: #ffffff;
-                    padding: 40px 20px;
-                    text-align: center;
-                }
-                .header h1 {
-                    margin: 0;
-                    font-size: 32px;
-                    letter-spacing: 1px;
-                }
-                .header p {
-                    margin: 10px 0 0;
-                    font-size: 18px;
-                    opacity: 0.9;
-                }
-                .content {
-                    padding: 40px 30px;
-                }
-                .greeting {
-                    font-size: 20px;
-                    font-weight: bold;
-                    margin-bottom: 20px;
-                    color: #333;
-                }
-                .message {
-                    font-size: 16px;
-                    color: #555;
-                    margin-bottom: 30px;
-                }
-                .events-section {
-                    background-color: #f1f8e9;
-                    border-radius: 8px;
-                    padding: 20px;
-                    margin-bottom: 30px;
-                }
-                .events-section h3 {
-                    margin-top: 0;
-                    color: #2e7d32;
-                    font-size: 18px;
-                    border-bottom: 1px solid #c8e6c9;
-                    padding-bottom: 10px;
-                }
-                .qr-section {
-                    text-align: center;
-                    margin: 40px 0;
-                    padding: 20px;
-                    border: 2px dashed #4CAF50;
-                    border-radius: 12px;
-                }
-                .qr-section img {
-                    display: block;
-                    margin: 0 auto 15px;
-                }
-                .footer {
-                    background-color: #f1f3f5;
-                    padding: 30px;
-                    text-align: center;
-                    color: #6c757d;
-                    font-size: 13px;
-                }
-                .footer p { margin: 5px 0; }
-                .button {
-                    display: inline-block;
-                    padding: 12px 24px;
-                    background-color: #4CAF50;
-                    color: #ffffff;
-                    text-decoration: none;
-                    border-radius: 6px;
-                    font-weight: bold;
-                    margin: 20px 0;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="wrapper">
-                <div class="container">
-                    <div class="header">
-                        <h1>Texperia 2026</h1>
-                        <p>${title}</p>
-                    </div>
-
-                    <div class="content">
-                        <div class="greeting">${greeting}</div>
-                        <div class="message">${message}</div>
-
-                        ${eventsHtml ? `
-                        <div class="events-section">
-                            <h3>Registered Events</h3>
-                            ${eventsHtml}
-                        </div>
-                        ` : ''}
-
-                        ${qrCid ? `
-                        <div class="qr-section">
-                            <p style="font-weight: bold; color: #4CAF50; margin-bottom: 15px;">Official Entry QR Pass</p>
-                            <img src="cid:${qrCid}" width="200" height="200" alt="QR Code" />
-                            <p style="font-size: 12px; color: #888;">Keep this QR code ready at the entrance gate.</p>
-                        </div>
-                        ` : ''}
-
-                        <p>Best regards,<br><strong>Texperia Organizing Team</strong></p>
-                    </div>
-
-                    <div class="footer">
-                        <p>© 2026 Texperia at SNS College of Technology.</p>
-                        <p>This is an automated system email. Please do not reply.</p>
-                    </div>
-                </div>
+    const htmlTemplate = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title}</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #2c3e50;
+            margin: 0;
+            padding: 0;
+            background-color: #f8f9fa;
+        }
+        .wrapper {
+            background-color: #f8f9fa;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+        .header {
+            background-color: #4CAF50;
+            color: #ffffff;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 32px;
+            letter-spacing: 1px;
+        }
+        .header p {
+            margin: 10px 0 0;
+            font-size: 18px;
+            opacity: 0.9;
+        }
+        .content {
+            padding: 40px 30px;
+        }
+        .greeting {
+            font-size: 20px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+        .message {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #5a6c7d;
+            margin-bottom: 30px;
+        }
+        .events {
+            background-color: #f8f9fa;
+            border-left: 4px solid #4CAF50;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .qr-section {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 30px 20px;
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        .footer p {
+            margin: 5px 0;
+        }
+        @media only screen and (max-width: 600px) {
+            .container { margin: 0 10px; }
+            .header { padding: 30px 15px; }
+            .content { padding: 30px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <div class="header">
+                <h1>${title}</h1>
+                <p>Texperia 2026 Event Management</p>
             </div>
-        </body>
-        </html>
-    `;
+            <div class="content">
+                <div class="greeting">${greeting}</div>
+                <div class="message">${message}</div>
+                ${eventsHtml ? '<div class="events">' + eventsHtml + '</div>' : ''}
+                ${qrCid ? '<div class="qr-section"><img src="cid:' + qrCid + '" alt="QR Code" style="max-width: 200px;"/></div>' : ''}
+            </div>
+            <div class="footer">
+                <p><strong>SNS College of Technology</strong></p>
+                <p>Texperia 2026 - Technical Symposium</p>
+                <p>For support, contact the organizing team</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`;
+
+    // Generate plain text version for spam prevention
+    const plainText = plainTextMessage || [
+        title,
+        '='.repeat(title.length),
+        '',
+        greeting,
+        '',
+        message.replace(/<[^>]*>/g, ''),
+        '',
+        eventsHtml ? eventsHtml.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, '') : '',
+        '',
+        '---',
+        'SNS College of Technology',
+        'Texperia 2026 - Technical Symposium',
+        'For support, contact the organizing team'
+    ].join('\n');
+
+    return { html: htmlTemplate, text: plainText };
 };
 
 const sendConfirmationEmail = async ({
@@ -251,38 +241,64 @@ const sendConfirmationEmail = async ({
     const transporter = await getTransporter(senderType);
     const fromName = senderType === 'NCS' ? 'Texperia NCS Team' : 'Texperia CS Team';
     const fromEmail = senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER;
+    const replyToEmail = fromEmail;
 
-    const htmlBody = renderEmailTemplate({
-        title: 'Registration Successful',
-        greeting: `Hi ${name},`,
-        message: 'Your registration for Texperia 2026 has been successfully confirmed. We have attached your official registration pass to this email.',
+    const emailTemplate = renderEmailTemplate({
+        title: 'Registration Confirmed',
+        greeting: 'Hello ' + name + ',',
+        message: 'Your registration for Texperia 2026 has been successfully confirmed. We have attached your official registration pass to this email. Please bring this pass to the venue for entry.',
     });
 
+    // Log PDF buffer validation
+    console.log('[Email Service] PDF Buffer - Size: ' + (pdfBuffer ? pdfBuffer.length : 0) + ' bytes, Valid: ' + (pdfBuffer && pdfBuffer.length > 0));
+
+    if (!pdfBuffer || pdfBuffer.length === 0) {
+        console.error('[Email Service] WARNING: PDF buffer is empty or invalid!');
+    }
+
     const mailOptions = {
-        from: `"${fromName}" <${fromEmail}>`,
+        from: '"' + fromName + '" <' + fromEmail + '>',
         to,
-        subject: 'Texperia 2026 Registration Confirmed ✓',
-        html: htmlBody,
+        replyTo: replyToEmail,
+        subject: 'Texperia 2026 Registration Confirmed',
+        text: emailTemplate.text,
+        html: emailTemplate.html,
         attachments: [
             {
-                filename: `Texperia_Pass_${token}.pdf`,
+                filename: 'Texperia_Pass_' + token + '.pdf',
                 content: pdfBuffer,
+                contentType: 'application/pdf'
             }
         ],
         headers: {
-            'X-Priority': '1 (Highest)',
-            'X-MSMail-Priority': 'High',
-            'Importance': 'high'
+            'X-Priority': '3',
+            'X-Mailer': 'Texperia Event System',
+            'Organization': 'SNS College of Technology',
+            'List-Unsubscribe': '<mailto:noreply@' + fromEmail.split('@')[1] + '>',
         }
     };
 
     try {
-        console.log(`[Email Service] Sending registration pass to: ${to}`);
+        console.log('[Email Service] Sending registration pass to: ' + to);
+        console.log('[Email Service] Using sender: ' + fromName + ' <' + fromEmail + '>');
+
         const info = await transporter.sendMail(mailOptions);
-        console.log(`[Email Service] Email sent: ${info.response}`);
+        console.log('[Email Service] Registration email sent successfully');
+        console.log('[Email Service] Message ID: ' + info.messageId);
+        console.log('[Email Service] Response: ' + info.response);
+
+        // DKIM/SPF suggestion
+        console.log('[Email Service] TIP: Ensure SPF record includes: v=spf1 include:_spf.google.com ~all');
+        console.log('[Email Service] TIP: Ensure DKIM is configured in Google Workspace Admin');
+
         return true;
     } catch (error) {
-        console.error('[Email Service] Error sending registration email:', error);
+        console.error('[Email Service] Registration email failed for ' + to + ': ' + error.message);
+        console.error('[Email Service] Error details:', {
+            code: error.code,
+            command: error.command,
+            response: error.response
+        });
         return false;
     }
 };
@@ -301,23 +317,25 @@ const sendAttendanceEmail = async ({
 
     const allEvents = [...day1Events, ...day2Events];
     const eventsHtml = allEvents.length > 0
-        ? `<ul style="padding-left: 20px;">${allEvents.map(e => `<li>${e}</li>`).join('')}</ul>`
+        ? '<ul style="padding-left: 20px;">' + allEvents.map(function(e) { return '<li>' + e + '</li>'; }).join('') + '</ul>'
         : '<p>Standard Admission</p>';
 
     const qrCid = 'entry-qr-code';
-    const htmlBody = renderEmailTemplate({
+    const emailTemplate = renderEmailTemplate({
         title: 'Attendance Confirmed',
-        greeting: `Welcome, ${name}!`,
+        greeting: 'Welcome, ' + name + '!',
         message: 'Your attendance has been officially marked. You are cleared to participate in the events listed below. Enjoy Texperia 2026!',
-        eventsHtml,
-        qrCid
+        eventsHtml: eventsHtml,
+        qrCid: qrCid
     });
 
     const mailOptions = {
-        from: `"${fromName}" <${fromEmail}>`,
+        from: '"' + fromName + '" <' + fromEmail + '>',
         to,
-        subject: 'Texperia 2026 - Attendance Confirmed ✓',
-        html: htmlBody,
+        replyTo: fromEmail,
+        subject: 'Texperia 2026 - Attendance Confirmed',
+        html: emailTemplate.html,
+        text: emailTemplate.text,
         attachments: qrBase64 ? [
             {
                 filename: 'qr-code.png',
@@ -327,15 +345,16 @@ const sendAttendanceEmail = async ({
             }
         ] : [],
         headers: {
-            'X-Priority': '1 (Highest)',
-            'Importance': 'high'
+            'X-Priority': '3',
+            'X-Mailer': 'Texperia Event System',
+            'Organization': 'SNS College of Technology',
         }
     };
 
     try {
-        console.log(`[Email Service] Sending attendance confirmation to: ${to}`);
+        console.log('[Email Service] Sending attendance confirmation to: ' + to);
         const info = await transporter.sendMail(mailOptions);
-        console.log(`[Email Service] Attendance email sent: ${info.response}`);
+        console.log('[Email Service] Attendance email sent: ' + info.response);
         return true;
     } catch (error) {
         console.error('[Email Service] Attendance email error:', error.message);
@@ -343,7 +362,76 @@ const sendAttendanceEmail = async ({
     }
 };
 
+const sendLunchEmail = async ({
+    senderType,
+    to,
+    name,
+    token,
+    pdfBuffer
+}) => {
+    const transporter = await getTransporter(senderType);
+    const fromName = senderType === 'NCS' ? 'Texperia NCS Team' : 'Texperia CS Team';
+    const fromEmail = senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER;
+    const replyToEmail = fromEmail;
+
+    const emailTemplate = renderEmailTemplate({
+        title: 'Lunch Token Ready',
+        greeting: 'Hello ' + name + ',',
+        message: 'Your lunch for Texperia 2026 is confirmed! We have attached your lunch token to this email. Please present this token at the lunch venue during meal time.',
+    });
+
+    // Log PDF buffer validation
+    console.log('[Email Service] Lunch PDF Buffer - Size: ' + (pdfBuffer ? pdfBuffer.length : 0) + ' bytes, Valid: ' + (pdfBuffer && pdfBuffer.length > 0));
+
+    if (!pdfBuffer || pdfBuffer.length === 0) {
+        console.error('[Email Service] WARNING: Lunch PDF buffer is empty or invalid!');
+    }
+
+    const mailOptions = {
+        from: '"' + fromName + '" <' + fromEmail + '>',
+        to,
+        replyTo: replyToEmail,
+        subject: 'Texperia 2026 Lunch Token',
+        text: emailTemplate.text,
+        html: emailTemplate.html,
+        attachments: [
+            {
+                filename: 'Texperia_Lunch_' + token + '.pdf',
+                content: pdfBuffer,
+                contentType: 'application/pdf'
+            }
+        ],
+        headers: {
+            'X-Priority': '3',
+            'X-Mailer': 'Texperia Event System',
+            'Organization': 'SNS College of Technology',
+            'List-Unsubscribe': '<mailto:noreply@' + fromEmail.split('@')[1] + '>',
+        }
+    };
+
+    try {
+        console.log('[Email Service] Sending lunch token to: ' + to);
+        console.log('[Email Service] Using sender: ' + fromName + ' <' + fromEmail + '>');
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('[Email Service] Lunch email sent successfully');
+        console.log('[Email Service] Message ID: ' + info.messageId);
+        console.log('[Email Service] Response: ' + info.response);
+
+        return true;
+    } catch (error) {
+        console.error('[Email Service] Lunch email failed for ' + to + ': ' + error.message);
+        console.error('[Email Service] Error details:', {
+            code: error.code,
+            command: error.command,
+            response: error.response
+        });
+        return false;
+    }
+};
+
 module.exports = {
     sendConfirmationEmail,
     sendAttendanceEmail,
+    sendLunchEmail,
 };

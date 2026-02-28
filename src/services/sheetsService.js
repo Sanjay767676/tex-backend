@@ -4,8 +4,8 @@ const { randomUUID } = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const QRCode = require('qrcode');
-const { sendConfirmationEmail, sendAttendanceEmail } = require('./emailService');
-const { generateRegistrationPass } = require('./pdfService');
+const { sendConfirmationEmail, sendAttendanceEmail, sendLunchEmail } = require('./emailService');
+const { generateRegistrationPass, generateLunchPass } = require('./pdfService');
 const {
     normalizeValue,
     getColumnByAlias,
@@ -383,7 +383,7 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
                 eventsList: [...day1Events, ...day2Events],
                 token,
                 qrBase64
-            });
+            }, 'attendance');
 
             // Update sheet FIRST (token, QR Link, Time, Pending Mail)
             const updates = {
@@ -431,11 +431,13 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
 
 /**
  * Warms up the in-memory cache by fetching tokens from all configured sheets.
+ * Enhanced with TEST_MODE support and better error handling.
  */
-const warmupCache = async () => {
+const warmUpCache = async () => {
     if (isCacheWarming) return;
     isCacheWarming = true;
     console.log('[Sheets Service] 🚀 Warming up registration cache...');
+    console.log(`[Sheets Service] Mode: ${env.testMode ? '🧪 TEST' : '🚀 PRODUCTION'}`);
 
     const allSheetIds = [
         ...Object.values(env.csSheets),
@@ -443,10 +445,14 @@ const warmupCache = async () => {
         env.testSheetId
     ].filter(id => id && id.trim() !== '');
 
+    console.log(`[Sheets Service] Fetching from ${allSheetIds.length} sheets:`, allSheetIds);
+
     let totalTokens = 0;
 
     for (const spreadsheetId of allSheetIds) {
         try {
+            console.log(`[Sheets Service] Processing sheet: ${spreadsheetId}`);
+            
             const { headerMap } = await getHeaderInfo(spreadsheetId);
             const cachedMetadata = metadataCache.get(spreadsheetId);
             const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
@@ -455,12 +461,21 @@ const warmupCache = async () => {
             const attendanceIdx = getColumnByAlias(headerMap, 'attendance');
             const lunchIdx = getColumnByAlias(headerMap, 'lunch');
 
-            if (tokenIdx === -1) continue;
+            if (tokenIdx === -1) {
+                console.warn(`[Sheets Service] No token column found in sheet ${spreadsheetId}`);
+                continue;
+            }
 
             const rows = await getSheetRows(spreadsheetId, `'${sheetTitle}'!${SHEET_NAME}`);
-            if (rows.length < 2) continue;
+            if (rows.length < 2) {
+                console.log(`[Sheets Service] No data rows in sheet ${spreadsheetId}`);
+                continue;
+            }
+
+            console.log(`[Sheets Service] Found ${rows.length - 1} data rows in sheet ${spreadsheetId}`);
 
             const headers = rows[0];
+            let sheetTokens = 0;
 
             rows.slice(1).forEach((row, index) => {
                 const token = normalizeValue(row[tokenIdx]);
@@ -478,11 +493,26 @@ const warmupCache = async () => {
                         attendance: attendanceVal === 'PRESENT',
                         lunch: ['PRESENT', 'SCANNED', 'TRUE', 'TAKEN'].includes(lunchVal) || (lunchVal !== '' && lunchVal !== 'ABSENT' && lunchVal !== 'FALSE')
                     });
+                    sheetTokens++;
                     totalTokens++;
                 }
             });
+            
+            console.log(`[Sheets Service] ✅ Sheet ${spreadsheetId}: ${sheetTokens} tokens cached`);
+            
         } catch (err) {
-            console.error(`[Sheets Service] Warmup failed for ${spreadsheetId}:`, err.message);
+            console.error(`[Sheets Service] ❌ Warmup failed for sheet ${spreadsheetId}:`, err.message);
+            
+            // Check for common Google Sheets API errors
+            if (err.message.includes('Unable to parse range')) {
+                console.error(`[Sheets Service] 🔍 Sheet format issue - check if sheet has proper structure`);
+            } else if (err.message.includes('not found')) {
+                console.error(`[Sheets Service] 🔍 Sheet not found - verify spreadsheet ID: ${spreadsheetId}`);
+            } else if (err.message.includes('permission')) {
+                console.error(`[Sheets Service] 🔍 Permission denied - check service account access for: ${spreadsheetId}`);
+            } else if (err.message.includes('Quota')) {
+                console.error(`[Sheets Service] 🔍 API Quota exceeded - reduce request frequency`);
+            }
         }
     }
 
@@ -491,11 +521,11 @@ const warmupCache = async () => {
 };
 
 // Start warmup on init and setup periodic refresh
-warmupCache().catch(console.error);
+warmUpCache().catch(console.error);
 if (eventConfig.scanCacheEnabled) {
     const intervalMs = (eventConfig.scanCacheRefreshIntervalMinutes || 15) * 60 * 1000;
     setInterval(() => {
-        warmupCache().catch(err => console.error('[Sheets Service] Periodic cache refresh failed:', err.message));
+        warmUpCache().catch(err => console.error('[Sheets Service] Periodic cache refresh failed:', err.message));
     }, intervalMs);
 }
 
@@ -689,7 +719,50 @@ const handleLunchScan = async (token) => {
     rowInfo.lunch = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. UPDATE SHEETS ASYNC
+    // 5. GENERATE AND SEND LUNCH PDF
+    try {
+        const nameIdx = getColumnByAlias(headerMap, 'name');
+        const emailIdx = getColumnByAlias(headerMap, 'email');
+        const collegeIdx = getColumnByAlias(headerMap, 'college');
+        const row = rowInfo.row || await getRowByIndex(spreadsheetId, rowIndex, headers, sheetTitle);
+        
+        const studentName = nameIdx === -1 ? 'Student' : normalizeValue(row[nameIdx]) || 'Student';
+        const studentEmail = emailIdx === -1 ? '' : normalizeValue(row[emailIdx]);
+        const college = collegeIdx === -1 ? 'N/A' : normalizeValue(row[collegeIdx]) || 'N/A';
+        
+        if (studentEmail) {
+            const { day1Events, day2Events } = extractEvents(row, headers);
+            const { qrBase64 } = await generateQRCode(normalizedToken);
+            
+            const lunchPdfBuffer = await generateLunchPass({
+                studentName,
+                studentEmail,
+                college,
+                department: 'N/A',
+                day: 'N/A',
+                eventsList: [...day1Events, ...day2Events],
+                token: normalizedToken,
+                qrBase64,
+                venue: 'Main Cafeteria'
+            });
+
+            sendLunchEmail({
+                senderType: rowInfo.senderType || 'CS',
+                to: studentEmail,
+                name: studentName,
+                token: normalizedToken,
+                pdfBuffer: lunchPdfBuffer
+            }).then((emailResult) => {
+                console.log(`[Lunch Service] Lunch email sent: ${emailResult}`);
+            }).catch((err) => {
+                console.error(`[Lunch Service] Failed to send lunch email:`, err.message);
+            });
+        }
+    } catch (error) {
+        console.error('[Lunch Service] Error generating lunch PDF:', error.message);
+    }
+
+    // 6. UPDATE SHEETS ASYNC
     markLunchPresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
         .catch(err => console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message));
 
@@ -707,4 +780,5 @@ module.exports = {
     isValidToken,
     handleScan,
     handleLunchScan,
+    warmUpCache, // For cache refresh
 };
