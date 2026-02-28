@@ -366,6 +366,16 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             const department = deptIdx !== -1 ? normalizeValue(latestRow[deptIdx]) : 'N/A';
             const college = collegeIdx !== -1 ? normalizeValue(latestRow[collegeIdx]) : 'N/A';
 
+            // Write token to sheet FIRST (prevents duplicate processing on next cycle)
+            const updates = {
+                token,
+                qrLink: scanUrl,
+                tokenGeneratedTime: new Date().toISOString(),
+                mailSent: 'PENDING',
+            };
+            await updateRowColumns(spreadsheetId, payment.rowIndex, updates, headers, headerMap, sheetTitle);
+            console.log(`[Payment Processing] 💾 Token written to sheet for row ${payment.rowIndex}`);
+
             // Determine registration day
             let dayText = 'N/A';
             if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
@@ -384,16 +394,6 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
                 token,
                 qrBase64
             }, 'attendance');
-
-            // Update sheet FIRST (token, QR Link, Time, Pending Mail)
-            const updates = {
-                token,
-                qrLink: scanUrl,
-                tokenGeneratedTime: new Date().toISOString(),
-                mailSent: 'PENDING',
-            };
-
-            await updateRowColumns(spreadsheetId, payment.rowIndex, updates, headers, headerMap, sheetTitle);
 
             // Send email
             if (studentEmail) {
