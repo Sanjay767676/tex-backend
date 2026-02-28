@@ -651,12 +651,20 @@ const handleScan = async (token) => {
     const emailIdx = getColumnByAlias(headerMap, 'email');
     const row = rowInfo.row || await getRowByIndex(spreadsheetId, rowIndex, headers, sheetTitle);
 
+    console.log(`[Attendance Email] Column resolution - nameIdx: ${nameIdx}, emailIdx: ${emailIdx}`);
+    console.log(`[Attendance Email] Row data available: ${row ? 'YES (' + row.length + ' cols)' : 'NO'}`);
+
     const studentEmail = emailIdx === -1 ? '' : normalizeValue(row[emailIdx]);
     const studentName = nameIdx === -1 ? 'Student' : normalizeValue(row[nameIdx]) || 'Student';
 
+    console.log(`[Attendance Email] Student: ${studentName}, Email: ${studentEmail || 'NOT FOUND'}, SenderType: ${senderType}`);
+
     if (studentEmail) {
+        console.log(`[Attendance Email] Generating QR and sending email to ${studentEmail}...`);
         const { day1Events, day2Events } = extractEvents(row, headers);
+        console.log(`[Attendance Email] Events - Day1: [${day1Events.join(', ')}], Day2: [${day2Events.join(', ')}]`);
         generateQRCode(normalizedToken).then(({ qrBase64 }) => {
+            console.log(`[Attendance Email] QR generated, sending email now...`);
             return sendAttendanceEmail({
                 senderType,
                 to: studentEmail,
@@ -665,7 +673,17 @@ const handleScan = async (token) => {
                 day2Events,
                 qrBase64,
             });
-        }).catch((err) => console.error('[Sheets Service] Failed to send attendance email:', err.message));
+        }).then(() => {
+            console.log(`[Attendance Email] ✅ Email sent successfully to ${studentEmail}`);
+        }).catch((err) => {
+            console.error(`[Attendance Email] ❌ Failed to send attendance email to ${studentEmail}:`, err.message);
+            console.error(`[Attendance Email] ❌ Error stack:`, err.stack);
+        });
+    } else {
+        console.warn(`[Attendance Email] ⚠️ No email found for row ${rowIndex} - emailIdx: ${emailIdx}, skipping email send`);
+        if (emailIdx !== -1 && row) {
+            console.warn(`[Attendance Email] ⚠️ Raw value at emailIdx[${emailIdx}]: "${row[emailIdx]}"`);
+        }
     }
 
     return { rowIndex, senderType };
