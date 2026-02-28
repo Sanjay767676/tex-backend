@@ -177,7 +177,7 @@ const parseRows = (rows, spreadsheetId, sheetTitle) => {
             else if (token !== '') reason = 'Token already exists';
             else if (mailSent === 'YES') reason = 'Mail already sent';
 
-            if (reason && spreadsheetId === env.csSheets.events) {
+            if (reason && (spreadsheetId === env.csSheets.events || spreadsheetId === env.testSheetId)) {
                 console.log(`[Sheets Service] Row ${rowIndex} skipped on "${sheetTitle}": ${reason}`);
             }
         }

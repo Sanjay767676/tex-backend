@@ -7,7 +7,6 @@ const { getPendingPayments, processPaymentTokens } = require('./sheetsService');
  */
 const processPayments = async () => {
     const startTime = Date.now();
-    console.log('[Payment Processor] Starting automatic payment check across 6 sheets...');
 
     try {
         const sheetConfigs = [
@@ -18,6 +17,13 @@ const processPayments = async () => {
             { id: env.ncsSheets.workshop, type: 'NCS', name: 'NCS Workshop' },
             { id: env.ncsSheets.hackathon, type: 'NCS', name: 'NCS Hackathon' },
         ];
+
+        // Include the testing sheet if configured
+        if (env.testSheetId) {
+            sheetConfigs.push({ id: env.testSheetId, type: 'CS', name: 'Testing Sheet' });
+        }
+
+        console.log(`[Payment Processor] Starting automatic payment check across ${sheetConfigs.length} sheets...`);
 
         let totalProcessedCount = 0;
         const results = [];
