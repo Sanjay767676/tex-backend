@@ -679,27 +679,15 @@ const handleScan = async (token) => {
         // Run the email + lunch token generation async in background
         (async () => {
             try {
-                // 1. Attendance email
-                const { qrBase64: attendanceQr } = await generateQRCode(normalizedToken, 'scan');
-                await sendAttendanceEmail({
-                    senderType,
-                    to: studentEmail,
-                    name: studentName,
-                    day1Events,
-                    day2Events,
-                    qrBase64: attendanceQr,
-                });
-                console.log(`[Attendance Email] ✅ Attendance email sent to ${studentEmail}`);
-
-                // 2. Generate unique LUNCH token (separate from attendance token)
+                // 1. Generate unique LUNCH token (separate from attendance token)
                 const { randomUUID } = require('crypto');
                 const lunchToken = `LUNCH-${randomUUID()}`;
                 console.log(`[Lunch] Token Generated: ${lunchToken}`);
 
-                // 3. Generate lunch QR pointing to /lunch endpoint
+                // 2. Generate lunch QR pointing to /lunch endpoint
                 const { qrBase64: lunchQrBase64, scanUrl: lunchScanUrl } = await generateQRCode(lunchToken, 'lunch');
 
-                // 4. Write Lunch_QR_Link + Lunch_Status using aliases
+                // 3. Write Lunch_QR_Link + Lunch_Status using aliases
                 const googleSheets = require('../config/googleSheets');
                 const lunchQrLinkIdx = getColumnByAlias(headerMap, 'lunchLink');
                 const lunchStatusIdx = getColumnByAlias(headerMap, 'lunch');
@@ -727,8 +715,6 @@ const handleScan = async (token) => {
                         })
                     );
                     console.log(`[Lunch] Sheet Updated for row ${rowIndex}`);
-                } else {
-                    console.warn(`[Lunch] ⚠️ Lunch columns not found in sheet headers via aliases`);
                 }
 
                 // Cache the lunch token so it resolves on scan
@@ -744,7 +730,8 @@ const handleScan = async (token) => {
                     senderType,
                 });
 
-                // 5. Generate lunch PDF from HTML template
+                // 4. Generate lunch PDF
+                const { generateLunchPass } = require('./pdfService');
                 const lunchPdfBuffer = await generateLunchPass({
                     studentName,
                     studentEmail,
@@ -754,22 +741,23 @@ const handleScan = async (token) => {
                     eventsList: allEvents,
                     token: lunchToken,
                     qrBase64: lunchQrBase64,
-                    venue: 'Main Cafeteria',
+                    venue: 'Main Hall', // Venue placeholder as requested
                 });
                 console.log(`[Lunch] PDF Created for ${studentName}`);
 
-                // 6. Send lunch email
-                await sendLunchEmail({
+                // 5. Send consolidated Attendance Confirmation + Lunch Token email
+                const { sendAttendanceConfirmedWithLunchEmail } = require('./emailService');
+                await sendAttendanceConfirmedWithLunchEmail({
                     senderType,
                     to: studentEmail,
                     name: studentName,
                     token: lunchToken,
                     pdfBuffer: lunchPdfBuffer,
                 });
-                console.log(`[Lunch] Mail Sent to ${studentEmail}`);
+                console.log(`[Workflow] ✅ Attendance confirmed & Lunch token sent to ${studentEmail}`);
 
             } catch (err) {
-                console.error(`[Scan Process] ❌ Async flow failed for ${studentEmail}:`, err.message);
+                console.error(`[Scan Process] ❌ Consolidated flow failed for ${studentEmail}:`, err.message);
             }
         })();
 
@@ -848,10 +836,10 @@ const handleLunchScan = async (token) => {
                 spreadsheetId,
                 range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
                 valueInputOption: 'USER_ENTERED',
-                requestBody: { values: [['USED']] },
+                requestBody: { values: [['TAKEN']] },
             })
         ).then(() => {
-            console.log(`[Lunch Scan] Used — row ${rowIndex} Status=USED`);
+            console.log(`[Lunch Scan] ✅ TAKEN — row ${rowIndex}`);
         }).catch(err => {
             console.error(`[Sheets Service] Critical lunch status update failure for ${normalizedToken}:`, err.message);
         });

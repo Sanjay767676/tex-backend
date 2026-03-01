@@ -397,8 +397,58 @@ const sendLunchEmail = async ({
     }
 };
 
+const sendAttendanceConfirmedWithLunchEmail = async ({
+    senderType,
+    to,
+    name,
+    token,
+    pdfBuffer
+}) => {
+    const transporter = await getTransporter(senderType);
+    const fromName = senderType === 'NCS' ? 'Texperia NCS Team' : 'Texperia CS Team';
+    const fromEmail = senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER;
+
+    const emailTemplate = renderEmailTemplate({
+        title: 'Attendance & Lunch Confirmed',
+        greeting: 'Hello ' + name + '!',
+        message: 'Your attendance for Texperia 2026 has been marked. We have attached your lunch token for today to this email. Please present the QR code in the attached PDF at the food counter.',
+    });
+
+    const mailOptions = {
+        from: '"' + fromName + '" <' + fromEmail + '>',
+        to,
+        replyTo: fromEmail,
+        subject: 'Texperia 2026 - Attendance Marked & Lunch Token',
+        html: emailTemplate.html,
+        text: emailTemplate.text,
+        attachments: [
+            {
+                filename: 'Texperia_Lunch_Token_' + token + '.pdf',
+                content: pdfBuffer,
+                contentType: 'application/pdf'
+            }
+        ],
+        headers: {
+            'X-Priority': '3',
+            'X-Mailer': 'Texperia Event System',
+            'Organization': 'SNS College of Technology',
+        }
+    };
+
+    try {
+        console.log('[Email Service] Sending consolidated attendance/lunch email to: ' + to);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('[Email Service] Consolidated email sent: ' + info.response);
+        return true;
+    } catch (error) {
+        console.error('[Email Service] Consolidated email error:', error.message);
+        return false;
+    }
+};
+
 module.exports = {
     sendConfirmationEmail,
     sendAttendanceEmail,
     sendLunchEmail,
+    sendAttendanceConfirmedWithLunchEmail,
 };

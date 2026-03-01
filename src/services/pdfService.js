@@ -93,11 +93,11 @@ const buildPDF = async ({
         ? eventsList.join(', ')
         : 'Texperia 2026';
     doc.font('Helvetica').fontSize(24).fillColor('#000')
-        .text(`Event : ${eventsText}\nVenue : ${venue || 'Main Cafeteria'}`, 142, 570, { width: 600, lineGap: 6 });
+        .text(`Event : ${eventsText}\nVenue : ${venue || 'Main Hall'}`, 142, 570, { width: 600, lineGap: 6 });
 
     // ── QR Code label + image
     doc.font('Helvetica-Bold').fontSize(24).fillColor('#000')
-        .text('Lunch QR Code', 281, 691, { width: 259, align: 'center' });
+        .text(title.includes('Lunch') ? 'Lunch QR Code' : 'Attendance QR Code', 281, 691, { width: 259, align: 'center' });
 
     if (qrBuffer) {
         doc.image(qrBuffer, 297, 740, { width: 220, height: 220 });
