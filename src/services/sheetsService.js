@@ -19,7 +19,7 @@ const eventConfig = require('../config/eventConfig.json');
 
 const SHEET_NAME = 'A:ZZ';
 
-// ─── Rate limiting & retry helpers ───────────────────────────────────────────
+// ─── Rate limiting & write-queue ───────────────────────────────────────────
 const MIN_REQUEST_GAP_MS = 1500; // minimum ms between Sheets API calls
 let lastRequestTime = 0;
 
@@ -58,6 +58,30 @@ const callWithRetry = async (fn, maxRetries = 4) => {
         }
     }
 };
+
+/**
+ * Basic write-queue to ensure serialized updates and no dropped requests.
+ */
+class WriteQueue {
+    constructor() {
+        this.queue = Promise.resolve();
+    }
+
+    add(fn) {
+        this.queue = this.queue.then(async () => {
+            try {
+                return await fn();
+            } catch (err) {
+                console.error('[Write Queue] Error executing task:', err.message);
+                // We don't want to break the whole chain if one write fails, 
+                // but we should log it. callWithRetry handles internal retries.
+            }
+        });
+        return this.queue;
+    }
+}
+
+const globalWriteQueue = new WriteQueue();
 // ─────────────────────────────────────────────────────────────────────────────
 const HEADER_CACHE_TTL_MS = 5 * 60 * 1000;
 const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
@@ -298,18 +322,20 @@ const updateRowColumns = async (spreadsheetId, rowIndex, updates, headers, heade
 
     if (data.length === 0) return null;
 
-    const response = await callWithRetry(() =>
-        sheets.spreadsheets.values.batchUpdate({
-            spreadsheetId,
-            requestBody: {
-                valueInputOption: 'USER_ENTERED',
-                data,
-            },
-        })
-    );
-
-    console.log(`[Sheets Service] Updated row ${rowIndex} in ${spreadsheetId}`);
-    return response.data;
+    // Use global write queue to prevent dropped updates during high flow
+    return globalWriteQueue.add(async () => {
+        const response = await callWithRetry(() =>
+            sheets.spreadsheets.values.batchUpdate({
+                spreadsheetId,
+                requestBody: {
+                    valueInputOption: 'USER_ENTERED',
+                    data,
+                },
+            })
+        );
+        console.log(`[Sheets Service] ✅ Write Queue: Updated row ${rowIndex} in ${spreadsheetId}`);
+        return response.data;
+    });
 };
 
 const buildToken = (prefix) => `${prefix}-${randomUUID()}`;
@@ -557,7 +583,8 @@ const findRowByToken = async (spreadsheetId, token) => {
     const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
 
     const tokenCol = getColumnLetterByAlias(headers, headerMap, 'token');
-    const range = `'${sheetTitle}'!${tokenCol}2:${tokenCol}`;
+    const lastColumn = indexToColumn(Math.max(headers.length - 1, 0));
+    const range = `'${sheetTitle}'!A2:${lastColumn}`; // Fetch everything at once to find row + data
 
     const response = await callWithRetry(() =>
         sheets.spreadsheets.values.get({
@@ -569,9 +596,10 @@ const findRowByToken = async (spreadsheetId, token) => {
     const values = response.data.values || [];
 
     for (let i = 0; i < values.length; i += 1) {
-        const cellValue = normalizeValue(values[i][0]);
+        const row = values[i];
+        const cellValue = normalizeValue(row[tokenIdx]); // tokenIdx is from headerMap
         if (cellValue && cellValue === normalizedToken) {
-            return { rowIndex: i + 2, headers, headerMap, sheetTitle };
+            return { rowIndex: i + 2, headers, headerMap, sheetTitle, row };
         }
     }
 
@@ -672,7 +700,7 @@ const handleScan = async (token) => {
 
     // 3. CHECK STATUS (Memory-First)
     if (attendance === true) {
-        const error = new Error('Attendance already marked');
+        const error = new Error('already marked');
         error.statusCode = 409;
         throw error;
     }
@@ -681,9 +709,9 @@ const handleScan = async (token) => {
     rowInfo.attendance = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. UPDATE SHEETS ASYNC (Single Instance Safety)
+    // 5. UPDATE SHEETS ASYNC (Via global queue)
     markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
-        .catch(err => console.error(`[Sheets Service] Critical background update failure for ${normalizedToken}:`, err.message));
+        .catch(err => console.error(`[Sheets Service] Queue execution failure for ${normalizedToken}:`, err.message));
 
     // 6. SEND EMAIL ASYNC
     const nameIdx = getColumnByAlias(headerMap, 'name');
@@ -805,7 +833,7 @@ const handleScan = async (token) => {
         }
     }
 
-    return { rowIndex, senderType };
+    return { message: 'Marked status', rowIndex, senderType };
 };
 
 const handleLunchScan = async (token) => {
@@ -856,7 +884,7 @@ const handleLunchScan = async (token) => {
 
     // Prevent double scan — check both cache flag and sheet value
     if (lunch === true || ['USED', 'TAKEN', 'PRESENT'].includes(currentLunchStatus)) {
-        const error = new Error('Lunch already taken');
+        const error = new Error('luchh token alredy availed');
         error.statusCode = 409;
         throw error;
     }
@@ -865,28 +893,17 @@ const handleLunchScan = async (token) => {
     rowInfo.lunch = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. UPDATE Lunch_Status = "USED" in sheet using alias
-    if (lunchStatusIdx !== -1) {
-        const colLetter = indexToColumn(lunchStatusIdx);
-        callWithRetry(() =>
-            require('../config/googleSheets').spreadsheets.values.update({
-                spreadsheetId,
-                range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
-                valueInputOption: 'USER_ENTERED',
-                requestBody: { values: [['TAKEN']] },
-            })
-        ).then(() => {
-            console.log(`[Lunch Scan] ✅ TAKEN — row ${rowIndex}`);
-        }).catch(err => {
-            console.error(`[Sheets Service] Critical lunch status update failure for ${normalizedToken}:`, err.message);
-        });
-    } else {
-        // Fallback: use alias-based mark
-        markLunchPresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
-            .catch(err => console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message));
-    }
+    // 5. QUEUE UPDATE IN SHEET
+    globalWriteQueue.add(async () => {
+        try {
+            await updateRowColumns(spreadsheetId, rowIndex, { lunch: 'TAKEN' }, headers, headerMap, sheetTitle);
+            console.log(`[Lunch Scan] ✅ lunch token marked — row ${rowIndex}`);
+        } catch (err) {
+            console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message);
+        }
+    });
 
-    return { rowIndex, senderType: resolvedSenderType };
+    return { message: 'lunch token marked', rowIndex, senderType: resolvedSenderType };
 };
 
 module.exports = {

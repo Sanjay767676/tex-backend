@@ -44,7 +44,7 @@ const buildPDF = async ({
     token,
     extraRows = [],
 }) => {
-    // A4 at 96dpi → pdfkit points (72dpi): 794px → 595pt, 1123px → 841pt
+    // Canvas matches pixel coordinates in the user provided HTML
     const W = 794;
     const H = 1123;
 
@@ -56,52 +56,55 @@ const buildPDF = async ({
     const snsInstitutions = loadImage('SNS_institutions_logo.png');
     const qrBuffer = qrBase64 ? dataUrlToBuffer(qrBase64) : null;
 
-    // ── Footer gold bar (absolute, drawn first so content overlaps cleanly)
-    doc.rect(0, H - 44, W, 44).fill('#FACB01');
-    doc.font('Helvetica-Bold').fontSize(11).fillColor('#1a1a1a')
-        .text('SNS College of Technology — Texperia 2026', 0, H - 28, { align: 'center', width: W });
+    // ── Footer gold bar (Rectangle 1)
+    doc.rect(0, 1079, 794, 44).fill('#FACB01');
 
     // ── Logos
     if (snsEmblem) doc.image(snsEmblem, 3, 7, { width: 106, height: 106 });
-    if (texperiaLogo) doc.image(texperiaLogo, 83, -46, { width: 647 });
+    if (texperiaLogo) doc.image(texperiaLogo, 83, -46, { width: 647, height: 458 });
     if (snsInstitutions) doc.image(snsInstitutions, 632, 6, { width: 157, height: 110 });
 
-    // ── Title
+    // ── Title (Registration Pass / Lunch Pass)
+    const titleText = title === 'Registration Pass' ? 'Registration Pass' : 'Lunch Pass';
     doc.font('Helvetica-Bold').fontSize(32).fillColor('#000000')
-        .text(title, 0, 305, { align: 'center', width: W });
+        .text(titleText, 260, 305, { width: 295, align: 'center' });
 
-    // ── Participant Details section
-    // Gold left accent bar
-    doc.rect(56, 351, 6, 49).fill('#FFB909');
-    doc.font('Helvetica-Bold').fontSize(24).fillColor('#000')
-        .text('Participant Details :', 64, 373, { width: 250 });
+    // ── Student Details Header
+    doc.rect(56, 351, 6, 49).fill('#FFB909'); // Rectangle 2
+    doc.font('Helvetica').fontSize(24).fillColor('#000000')
+        .text('Student Details :', 64, 373, { width: 185 });
 
-    // Detail content
-    const eventsText = eventsList && eventsList.length > 0 ? eventsList.join(', ') : 'Texperia 2026';
-    const detailText = `Name : ${studentName || 'N/A'}\nEmail ID : ${studentEmail || 'N/A'}\nCollege : ${college || 'N/A'}\nEvent : ${eventsText}`;
+    // ── Student Details Content
+    const detailY = 412;
+    const detailX = 142;
+    doc.font('Helvetica').fontSize(24).fillColor('#000000')
+        .text(`Name : ${studentName}`, detailX, detailY, { width: 450 })
+        .text(`Email : ${studentEmail}`, detailX, doc.y + 6)
+        .text(`College : ${college}`, detailX, doc.y + 6);
 
-    doc.font('Helvetica').fontSize(24).fillColor('#000')
-        .text(detailText, 142, 412, { width: 650, lineGap: 6 });
+    // ── Registered Event / Event Venue Header
+    doc.rect(56, 511, 6, 49).fill('#FFB909'); // Rectangle 3
+    const secondHeader = title === 'Registration Pass' ? 'Registered Event :' : 'Event  Venue';
+    doc.font('Helvetica').fontSize(24).fillColor('#000000')
+        .text(secondHeader, 64, 531, { width: 225 });
 
-    // ── Venue / Event section
-    if (venue && venue !== 'N/A') {
-        doc.rect(56, 511, 6, 49).fill('#FFB909');
-        doc.font('Helvetica-Bold').fontSize(24).fillColor('#000')
-            .text('Venue Details :', 64, 531, { width: 225 });
+    // ── Events / Venue Content
+    const eventsText = eventsList && eventsList.length > 0 ? eventsList.join('\n') : 'Texperia 2026';
+    const secondContent = title === 'Registration Pass' ? eventsText : (venue || 'Main Hall');
+    doc.font('Helvetica').fontSize(24).fillColor('#000000')
+        .text(secondContent, 142, 570, { width: 600, lineGap: 4 });
 
-        const eventsText = eventsList && eventsList.length > 0
-            ? eventsList.join(', ')
-            : 'Texperia 2026';
-        doc.font('Helvetica').fontSize(24).fillColor('#000')
-            .text(`Event : ${eventsText}\nVenue : ${venue}`, 142, 570, { width: 600, lineGap: 6 });
-    }
+    // ── QR Code Label (Attendance QR Code / Lunch QR code)
+    const isLunch = title.includes('Lunch');
+    const qrLabel = isLunch ? 'Lunch QR code' : 'Attendance QR Code';
+    doc.font('Helvetica').fontSize(24).fillColor('#000000')
+        .text(qrLabel, 281, 691, { width: 259, align: 'center' });
 
-    // ── QR Code label + image
-    doc.font('Helvetica-Bold').fontSize(24).fillColor('#000')
-        .text(title.includes('Lunch') ? 'Lunch QR Code' : 'Attendance QR Code', 281, 691, { width: 259, align: 'center' });
-
+    // ── QR Image
     if (qrBuffer) {
-        doc.image(qrBuffer, 297, 740, { width: 220, height: 220 });
+        // Lunch QR is specific size in HTML, using similar for both
+        const qrSize = isLunch ? { w: 263, h: 247, x: 249, y: 715 } : { w: 220, h: 220, x: 287, y: 735 };
+        doc.image(qrBuffer, qrSize.x, qrSize.y, { width: qrSize.w, height: qrSize.h });
     }
 
     doc.end();
