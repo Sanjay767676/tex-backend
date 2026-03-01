@@ -267,8 +267,8 @@ const extractEvents = (row, headers) => {
     return { day1Events, day2Events };
 };
 
-const generateQRCode = async (token) => {
-    const scanUrl = `${process.env.BASE_URL}/scan?token=${token}`;
+const generateQRCode = async (token, endpoint = 'scan') => {
+    const scanUrl = `${process.env.BASE_URL}/${endpoint}?token=${token}`;
     const qrDataUrl = await QRCode.toDataURL(scanUrl);
     return { qrBase64: qrDataUrl, scanUrl };
 };
@@ -452,7 +452,7 @@ const warmUpCache = async () => {
     for (const spreadsheetId of allSheetIds) {
         try {
             console.log(`[Sheets Service] Processing sheet: ${spreadsheetId}`);
-            
+
             const { headerMap } = await getHeaderInfo(spreadsheetId);
             const cachedMetadata = metadataCache.get(spreadsheetId);
             const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
@@ -497,12 +497,12 @@ const warmUpCache = async () => {
                     totalTokens++;
                 }
             });
-            
+
             console.log(`[Sheets Service] ✅ Sheet ${spreadsheetId}: ${sheetTokens} tokens cached`);
-            
+
         } catch (err) {
             console.error(`[Sheets Service] ❌ Warmup failed for sheet ${spreadsheetId}:`, err.message);
-            
+
             // Check for common Google Sheets API errors
             if (err.message.includes('Unable to parse range')) {
                 console.error(`[Sheets Service] 🔍 Sheet format issue - check if sheet has proper structure`);
@@ -662,9 +662,10 @@ const handleScan = async (token) => {
     if (studentEmail) {
         console.log(`[Attendance Email] Generating QR and sending email to ${studentEmail}...`);
         const { day1Events, day2Events } = extractEvents(row, headers);
-        console.log(`[Attendance Email] Events - Day1: [${day1Events.join(', ')}], Day2: [${day2Events.join(', ')}]`);
-        generateQRCode(normalizedToken).then(({ qrBase64 }) => {
-            console.log(`[Attendance Email] QR generated, sending email now...`);
+        const allEvents = [...day1Events, ...day2Events];
+
+        generateQRCode(normalizedToken, 'scan').then(({ qrBase64 }) => {
+            console.log(`[Attendance Email] QR generated, sending attendance email...`);
             return sendAttendanceEmail({
                 senderType,
                 to: studentEmail,
@@ -674,10 +675,46 @@ const handleScan = async (token) => {
                 qrBase64,
             });
         }).then(() => {
-            console.log(`[Attendance Email] ✅ Email sent successfully to ${studentEmail}`);
+            console.log(`[Attendance Email] ✅ Attendance email sent successfully to ${studentEmail}`);
+
+            // Generate LUNCH TOKEN immediately after attendance
+            console.log(`[Lunch Token] Generating lunch token for ${studentName}...`);
+            return generateQRCode(normalizedToken, 'lunch');
+        }).then(async ({ qrBase64: lunchQrBase64, scanUrl: lunchScanUrl }) => {
+            // Update sheat with lunch link if column exists
+            const lunchLinkIdx = getColumnByAlias(headerMap, 'lunchLink');
+            if (lunchLinkIdx !== -1) {
+                console.log(`[Lunch Token] 💾 Writing lunch link to sheet for row ${rowIndex}`);
+                await updateRowColumns(spreadsheetId, rowIndex, { lunchLink: lunchScanUrl }, headers, headerMap, sheetTitle);
+            }
+
+            // Generate and send Lunch Pass
+            const collegeIdx = getColumnByAlias(headerMap, 'college');
+            const college = collegeIdx === -1 ? 'N/A' : normalizeValue(row[collegeIdx]) || 'N/A';
+
+            const lunchPdfBuffer = await generateLunchPass({
+                studentName,
+                studentEmail,
+                college,
+                department: 'N/A',
+                day: 'N/A',
+                eventsList: allEvents,
+                token: normalizedToken,
+                qrBase64: lunchQrBase64,
+                venue: 'Main Cafeteria'
+            });
+
+            return sendLunchEmail({
+                senderType,
+                to: studentEmail,
+                name: studentName,
+                token: normalizedToken,
+                pdfBuffer: lunchPdfBuffer
+            });
+        }).then(() => {
+            console.log(`[Lunch Token] ✅ Lunch token sent successfully to ${studentEmail}`);
         }).catch((err) => {
-            console.error(`[Attendance Email] ❌ Failed to send attendance email to ${studentEmail}:`, err.message);
-            console.error(`[Attendance Email] ❌ Error stack:`, err.stack);
+            console.error(`[Scan Process] ❌ Async flow failed for ${studentEmail}:`, err.message);
         });
     } else {
         console.warn(`[Attendance Email] ⚠️ No email found for row ${rowIndex} - emailIdx: ${emailIdx}, skipping email send`);
@@ -737,52 +774,12 @@ const handleLunchScan = async (token) => {
     rowInfo.lunch = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. GENERATE AND SEND LUNCH PDF
-    try {
-        const nameIdx = getColumnByAlias(headerMap, 'name');
-        const emailIdx = getColumnByAlias(headerMap, 'email');
-        const collegeIdx = getColumnByAlias(headerMap, 'college');
-        const row = rowInfo.row || await getRowByIndex(spreadsheetId, rowIndex, headers, sheetTitle);
-        
-        const studentName = nameIdx === -1 ? 'Student' : normalizeValue(row[nameIdx]) || 'Student';
-        const studentEmail = emailIdx === -1 ? '' : normalizeValue(row[emailIdx]);
-        const college = collegeIdx === -1 ? 'N/A' : normalizeValue(row[collegeIdx]) || 'N/A';
-        
-        if (studentEmail) {
-            const { day1Events, day2Events } = extractEvents(row, headers);
-            const { qrBase64 } = await generateQRCode(normalizedToken);
-            
-            const lunchPdfBuffer = await generateLunchPass({
-                studentName,
-                studentEmail,
-                college,
-                department: 'N/A',
-                day: 'N/A',
-                eventsList: [...day1Events, ...day2Events],
-                token: normalizedToken,
-                qrBase64,
-                venue: 'Main Cafeteria'
-            });
-
-            sendLunchEmail({
-                senderType: rowInfo.senderType || 'CS',
-                to: studentEmail,
-                name: studentName,
-                token: normalizedToken,
-                pdfBuffer: lunchPdfBuffer
-            }).then((emailResult) => {
-                console.log(`[Lunch Service] Lunch email sent: ${emailResult}`);
-            }).catch((err) => {
-                console.error(`[Lunch Service] Failed to send lunch email:`, err.message);
-            });
-        }
-    } catch (error) {
-        console.error('[Lunch Service] Error generating lunch PDF:', error.message);
-    }
-
-    // 6. UPDATE SHEETS ASYNC
+    // 5. UPDATE SHEETS ASYNC
     markLunchPresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
         .catch(err => console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message));
+
+    // Optional: Log success (email was sent previously during attendance)
+    console.log(`[Lunch Service] Lunch marked for row ${rowIndex} (${senderType})`);
 
     return { rowIndex, senderType };
 };

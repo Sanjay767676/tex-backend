@@ -134,9 +134,16 @@ const columnAliases = {
         'Lunch Status',
         'Lunch_Status',
         'Lunch',
-        'Lunch_QR_Link',
         'Lunch_Mark',
         'Lunch QR Scan',
+    ],
+
+    // Lunch QR link column variations
+    lunchLink: [
+        'Lunch_QR_Link',
+        'Lunch QR Link',
+        'Lunch_Link',
+        'Lunch QR Code',
     ],
 };
 
