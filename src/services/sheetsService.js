@@ -795,7 +795,19 @@ const handleScan = async (token) => {
                     senderType,
                 });
 
-                // 4. Generate lunch PDF
+                // 4. Resolve Venue by Event Name
+                const venueMap = eventConfig.eventVenues || {};
+                let resolvedVenue = eventConfig.lunchVenue || 'Main Block Cafeteria'; // Default to lunch venue
+
+                // If the student has specific events, try to find a matching venue
+                for (const event of allEvents) {
+                    if (venueMap[event]) {
+                        resolvedVenue = venueMap[event];
+                        break;
+                    }
+                }
+
+                // 5. Generate lunch PDF
                 const { generateLunchPass } = require('./pdfService');
                 const lunchPdfBuffer = await generateLunchPass({
                     studentName,
@@ -806,7 +818,7 @@ const handleScan = async (token) => {
                     eventsList: allEvents,
                     token: lunchToken,
                     qrBase64: lunchQrBase64,
-                    venue: 'Main Hall', // Venue placeholder as requested
+                    venue: resolvedVenue,
                 });
                 console.log(`[Lunch] PDF Created for ${studentName}`);
 

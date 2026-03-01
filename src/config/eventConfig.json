@@ -3,5 +3,11 @@
     "venue": "",
     "lunchVenue": "Main Block Cafeteria",
     "scanCacheEnabled": true,
-    "scanCacheRefreshIntervalMinutes": 0.5
+    "scanCacheRefreshIntervalMinutes": 0.5,
+    "eventVenues": {
+        "Paper Presentation": "Seminar Hall 1",
+        "Coding Contest": "Computer Lab 4",
+        "Workshop": "Auditorium",
+        "Default": "Main Hall"
+    }
 }
