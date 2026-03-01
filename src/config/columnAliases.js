@@ -39,11 +39,20 @@ const columnAliases = {
         'Payment',
     ],
 
-    // Token column variations
+    // Token column variations (Attendance)
     token: [
+        'Token_1',
+        'Token 1',
         'Token',
         'Registration Token',
         'Unique Token',
+    ],
+
+    // Token column variations (Lunch)
+    token2: [
+        'Token_2',
+        'Token 2',
+        'Lunch Token',
     ],
 
     // Timestamp column variations

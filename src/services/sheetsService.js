@@ -402,7 +402,8 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
                 day: dayText,
                 eventsList: [...day1Events, ...day2Events],
                 token,
-                qrBase64
+                qrBase64,
+                venue: null // Hide venue in registration pass as requested
             }, 'attendance');
 
             // Send email
@@ -573,6 +574,28 @@ const findRowByToken = async (spreadsheetId, token) => {
             return { rowIndex: i + 2, headers, headerMap, sheetTitle };
         }
     }
+
+    // fallback: check Token_2 column if searching for a lunch token
+    if (normalizedToken.startsWith('LUNCH-')) {
+        const token2Col = getColumnLetterByAlias(headers, headerMap, 'token2');
+        if (token2Col && token2Col !== tokenCol) {
+            const range2 = `'${sheetTitle}'!${token2Col}2:${token2Col}`;
+            const response2 = await callWithRetry(() =>
+                sheets.spreadsheets.values.get({
+                    spreadsheetId,
+                    range: range2,
+                })
+            );
+            const values2 = response2.data.values || [];
+            for (let i = 0; i < values2.length; i += 1) {
+                const cellValue = normalizeValue(values2[i][0]);
+                if (cellValue && cellValue === normalizedToken) {
+                    return { rowIndex: i + 2, headers, headerMap, sheetTitle };
+                }
+            }
+        }
+    }
+
     return null;
 };
 
@@ -606,6 +629,12 @@ const markLunchPresent = async (spreadsheetId, rowIndex, headers, headerMap, she
 
 const handleScan = async (token) => {
     const normalizedToken = normalizeValue(token);
+
+    // If a lunch token is scanned at the attendance endpoint, redirect it
+    if (normalizedToken.toUpperCase().startsWith('LUNCH-')) {
+        console.log(`[Scan Redirection] 🔄 Redirecting lunch token ${normalizedToken} to handleLunchScan`);
+        return await handleLunchScan(token);
+    }
 
     if (!isValidToken(normalizedToken)) {
         const error = new Error('Invalid token format');
@@ -687,12 +716,20 @@ const handleScan = async (token) => {
                 // 2. Generate lunch QR pointing to /lunch endpoint
                 const { qrBase64: lunchQrBase64, scanUrl: lunchScanUrl } = await generateQRCode(lunchToken, 'lunch');
 
-                // 3. Write Lunch_QR_Link + Lunch_Status using aliases
+                // 3. Write Token_2 + Lunch_QR_Link + Lunch_Status using aliases
                 const googleSheets = require('../config/googleSheets');
+                const token2Idx = getColumnByAlias(headerMap, 'token2');
                 const lunchQrLinkIdx = getColumnByAlias(headerMap, 'lunchLink');
                 const lunchStatusIdx = getColumnByAlias(headerMap, 'lunch');
 
                 const sheetUpdates = [];
+                if (token2Idx !== -1) {
+                    const colLetter = indexToColumn(token2Idx);
+                    sheetUpdates.push({
+                        range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
+                        values: [[lunchToken]],
+                    });
+                }
                 if (lunchQrLinkIdx !== -1) {
                     const colLetter = indexToColumn(lunchQrLinkIdx);
                     sheetUpdates.push({
@@ -714,7 +751,7 @@ const handleScan = async (token) => {
                             requestBody: { valueInputOption: 'USER_ENTERED', data: sheetUpdates },
                         })
                     );
-                    console.log(`[Lunch] Sheet Updated for row ${rowIndex}`);
+                    console.log(`[Lunch] Sheet Updated with Token_2 for row ${rowIndex}`);
                 }
 
                 // Cache the lunch token so it resolves on scan

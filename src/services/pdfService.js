@@ -77,23 +77,24 @@ const buildPDF = async ({
         .text('Participant Details :', 64, 373, { width: 250 });
 
     // Detail content
-    let detailText = `Name: ${studentName || 'N/A'}   |   College: ${college || 'N/A'}`;
-    extraRows.forEach(([label, val]) => {
-        if (val && val !== 'N/A') detailText += `\n${label}: ${val}`;
-    });
+    const eventsText = eventsList && eventsList.length > 0 ? eventsList.join(', ') : 'Texperia 2026';
+    const detailText = `Name : ${studentName || 'N/A'}\nEmail ID : ${studentEmail || 'N/A'}\nCollege : ${college || 'N/A'}\nEvent : ${eventsText}`;
+
     doc.font('Helvetica').fontSize(24).fillColor('#000')
         .text(detailText, 142, 412, { width: 650, lineGap: 6 });
 
     // ── Venue / Event section
-    doc.rect(56, 511, 6, 49).fill('#FFB909');
-    doc.font('Helvetica-Bold').fontSize(24).fillColor('#000')
-        .text('Venue Details :', 64, 531, { width: 225 });
+    if (venue && venue !== 'N/A') {
+        doc.rect(56, 511, 6, 49).fill('#FFB909');
+        doc.font('Helvetica-Bold').fontSize(24).fillColor('#000')
+            .text('Venue Details :', 64, 531, { width: 225 });
 
-    const eventsText = eventsList && eventsList.length > 0
-        ? eventsList.join(', ')
-        : 'Texperia 2026';
-    doc.font('Helvetica').fontSize(24).fillColor('#000')
-        .text(`Event : ${eventsText}\nVenue : ${venue || 'Main Hall'}`, 142, 570, { width: 600, lineGap: 6 });
+        const eventsText = eventsList && eventsList.length > 0
+            ? eventsList.join(', ')
+            : 'Texperia 2026';
+        doc.font('Helvetica').fontSize(24).fillColor('#000')
+            .text(`Event : ${eventsText}\nVenue : ${venue}`, 142, 570, { width: 600, lineGap: 6 });
+    }
 
     // ── QR Code label + image
     doc.font('Helvetica-Bold').fontSize(24).fillColor('#000')
@@ -125,8 +126,6 @@ const generateRegistrationPass = async ({
 }, type = 'attendance') => {
     const title = type === 'lunch' ? 'Lunch Token' : 'Registration Pass';
     const extraRows = [];
-    if (department && department !== 'N/A') extraRows.push(['Department', department]);
-    if (day && day !== 'N/A') extraRows.push(['Day', day]);
 
     return buildPDF({
         title,
@@ -135,7 +134,7 @@ const generateRegistrationPass = async ({
         college,
         eventsList,
         qrBase64,
-        venue: venue || 'Main Hall',
+        venue, // Pass the venue as is (null for attendance)
         token,
         extraRows,
     });
