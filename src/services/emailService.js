@@ -2,6 +2,7 @@
  * Create a Nodemailer transporter using smtp.gmail.com hostname directly.
  * Using pool:true for connection reuse.
  */
+const nodemailer = require('nodemailer');
 const createTransporter = (user, pass) => {
     return nodemailer.createTransport({
         host: 'smtp.gmail.com',

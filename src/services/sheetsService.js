@@ -699,21 +699,23 @@ const handleScan = async (token) => {
                 // 3. Generate lunch QR pointing to /lunch endpoint
                 const { qrBase64: lunchQrBase64, scanUrl: lunchScanUrl } = await generateQRCode(lunchToken, 'lunch');
 
-                // 4. Write Lunch_QR_Link + Lunch_Status=PENDING using EXACT column names
+                // 4. Write Lunch_QR_Link + Lunch_Status using aliases
                 const googleSheets = require('../config/googleSheets');
-                const lunchQrLinkIdx = exactColumnIndex(headers, 'Lunch_QR_Link');
-                const lunchStatusIdx = exactColumnIndex(headers, 'Lunch_Status');
+                const lunchQrLinkIdx = getColumnByAlias(headerMap, 'lunchLink');
+                const lunchStatusIdx = getColumnByAlias(headerMap, 'lunch');
 
                 const sheetUpdates = [];
                 if (lunchQrLinkIdx !== -1) {
+                    const colLetter = indexToColumn(lunchQrLinkIdx);
                     sheetUpdates.push({
-                        range: `'${sheetTitle}'!${indexToColumn(lunchQrLinkIdx)}${rowIndex}`,
+                        range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
                         values: [[lunchScanUrl]],
                     });
                 }
                 if (lunchStatusIdx !== -1) {
+                    const colLetter = indexToColumn(lunchStatusIdx);
                     sheetUpdates.push({
-                        range: `'${sheetTitle}'!${indexToColumn(lunchStatusIdx)}${rowIndex}`,
+                        range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
                         values: [['PENDING']],
                     });
                 }
@@ -724,9 +726,9 @@ const handleScan = async (token) => {
                             requestBody: { valueInputOption: 'USER_ENTERED', data: sheetUpdates },
                         })
                     );
-                    console.log(`[Lunch] Sheet Updated — Lunch_QR_Link + Lunch_Status=PENDING for row ${rowIndex}`);
+                    console.log(`[Lunch] Sheet Updated for row ${rowIndex}`);
                 } else {
-                    console.warn(`[Lunch] ⚠️ Lunch_QR_Link / Lunch_Status columns not found in sheet headers`);
+                    console.warn(`[Lunch] ⚠️ Lunch columns not found in sheet headers via aliases`);
                 }
 
                 // Cache the lunch token so it resolves on scan
@@ -819,8 +821,8 @@ const handleLunchScan = async (token) => {
     const { rowIndex, headers, headerMap, lunch, sheetTitle, spreadsheetId, senderType: cachedSenderType } = rowInfo;
     const resolvedSenderType = cachedSenderType || senderType;
 
-    // 3. CHECK LUNCH STATUS using exact column
-    const lunchStatusIdx = exactColumnIndex(headers, 'Lunch_Status');
+    // 3. CHECK LUNCH STATUS using alias
+    const lunchStatusIdx = getColumnByAlias(headerMap, 'lunch');
     let currentLunchStatus = '';
     if (lunchStatusIdx !== -1) {
         const latestRow = rowInfo.row || [];
@@ -828,7 +830,7 @@ const handleLunchScan = async (token) => {
     }
 
     // Prevent double scan — check both cache flag and sheet value
-    if (lunch === true || currentLunchStatus === 'USED') {
+    if (lunch === true || ['USED', 'TAKEN', 'PRESENT'].includes(currentLunchStatus)) {
         const error = new Error('Lunch already taken');
         error.statusCode = 409;
         throw error;
@@ -838,7 +840,7 @@ const handleLunchScan = async (token) => {
     rowInfo.lunch = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. UPDATE Lunch_Status = "USED" in sheet using exact column name
+    // 5. UPDATE Lunch_Status = "USED" in sheet using alias
     if (lunchStatusIdx !== -1) {
         const colLetter = indexToColumn(lunchStatusIdx);
         callWithRetry(() =>
@@ -849,7 +851,7 @@ const handleLunchScan = async (token) => {
                 requestBody: { values: [['USED']] },
             })
         ).then(() => {
-            console.log(`[Lunch Scan] Used — row ${rowIndex} Lunch_Status=USED`);
+            console.log(`[Lunch Scan] Used — row ${rowIndex} Status=USED`);
         }).catch(err => {
             console.error(`[Sheets Service] Critical lunch status update failure for ${normalizedToken}:`, err.message);
         });
