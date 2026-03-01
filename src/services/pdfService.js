@@ -1,55 +1,11 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const fs = require('fs').promises;
 const path = require('path');
-const { execSync } = require('child_process');
 
-/**
- * Find a working Chrome/Chromium executable path.
- * Checks env var, common system paths, and falls back to Puppeteer's bundled Chrome.
- */
-const findChromePath = () => {
-    // 1. Check env var first
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-        console.log(`[PDF Service] Using Chrome from env: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
-        return process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-
-    // 2. Try common system paths (Azure Linux, Ubuntu, Alpine)
-    const commonPaths = [
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/google-chrome',
-        '/usr/local/bin/chromium',
-    ];
-
-    for (const p of commonPaths) {
-        try {
-            const stat = require('fs').statSync(p);
-            if (stat.isFile()) {
-                console.log(`[PDF Service] Found system Chrome at: ${p}`);
-                return p;
-            }
-        } catch (e) {
-            // not found, continue
-        }
-    }
-
-    // 3. Try 'which' command
-    try {
-        const result = execSync('which chromium-browser || which chromium || which google-chrome-stable 2>/dev/null', { encoding: 'utf-8' }).trim();
-        if (result) {
-            console.log(`[PDF Service] Found Chrome via which: ${result}`);
-            return result;
-        }
-    } catch (e) {
-        // not found
-    }
-
-    // 4. Let Puppeteer use its bundled Chrome (works locally)
-    console.log('[PDF Service] No system Chrome found, using Puppeteer bundled Chrome');
-    return undefined;
-};
+// Pre-configure @sparticuz/chromium for Azure
+chromium.setHeadlessMode = true;
+chromium.setGraphicsMode = false;
 
 /**
  * Convert image to base64 data URL
@@ -124,24 +80,16 @@ const generateRegistrationPass = async ({
             `<style>${cssContent}</style>`
         );
 
-        // Launch Puppeteer
-        const executablePath = findChromePath();
-        const launchOptions = {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu',
-                '--single-process',
-                '--no-zygote'
-            ]
-        };
-        if (executablePath) {
-            launchOptions.executablePath = executablePath;
-        }
-        browser = await puppeteer.launch(launchOptions);
+        // Launch Puppeteer with @sparticuz/chromium (works on Azure without system Chrome)
+        const executablePath = await chromium.executablePath();
+        console.log(`[PDF Service] Launching Chromium from: ${executablePath}`);
+        
+        browser = await puppeteer.launch({
+            executablePath,
+            headless: chromium.headless,
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport
+        });
 
         const page = await browser.newPage();
         

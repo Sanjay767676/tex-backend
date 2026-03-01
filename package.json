@@ -12,6 +12,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@sparticuz/chromium": "^133.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -19,7 +20,7 @@
     "googleapis": "^171.4.0",
     "nodemailer": "^8.0.1",
     "pdfkit": "^0.17.2",
-    "puppeteer": "^24.37.5",
+    "puppeteer-core": "^24.37.5",
     "qrcode": "^1.5.4"
   }
 }

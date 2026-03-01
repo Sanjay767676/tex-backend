@@ -14,7 +14,7 @@ console.log('[Startup] Environment loaded');
 //    BASE_URL=https://your-ngrok-url.ngrok-free.app
 // 5. Restart server
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     console.log('[Startup] Server started successfully');
