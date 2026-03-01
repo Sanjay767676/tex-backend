@@ -39,6 +39,7 @@ const buildPDF = async ({
     studentEmail,
     college,
     eventsList,
+    day,
     qrBase64,
     venue,
     token,
@@ -77,22 +78,30 @@ const buildPDF = async ({
     // ── Student Details Content
     const detailY = 412;
     const detailX = 142;
+    const formattedDay = day ? (day.includes('Day') ? day : `Day ${day}`) : '';
+    const eventsText = eventsList && eventsList.length > 0 ? eventsList.join('\n') : 'Texperia 2026';
+
     doc.font('Helvetica').fontSize(24).fillColor('#000000')
         .text(`Name : ${studentName}`, detailX, detailY, { width: 450 })
         .text(`Email : ${studentEmail}`, detailX, doc.y + 6)
         .text(`College : ${college}`, detailX, doc.y + 6);
 
-    // ── Registered Event / Event Venue Header
-    doc.rect(56, 511, 6, 49).fill('#FFB909'); // Rectangle 3
-    const secondHeader = title === 'Registration Pass' ? 'Registered Event :' : 'Event  Venue';
-    doc.font('Helvetica').fontSize(24).fillColor('#000000')
-        .text(secondHeader, 64, 531, { width: 225 });
+    if (formattedDay) {
+        doc.text(`Day : ${formattedDay}`, detailX, doc.y + 6);
+    }
 
-    // ── Events / Venue Content
-    const eventsText = eventsList && eventsList.length > 0 ? eventsList.join('\n') : 'Texperia 2026';
-    const secondContent = title === 'Registration Pass' ? eventsText : (venue || 'Main Hall');
-    doc.font('Helvetica').fontSize(24).fillColor('#000000')
-        .text(secondContent, 142, 570, { width: 600, lineGap: 4 });
+    // Add Event List to Student Details section as requested
+    doc.text(`Event : ${eventsText}`, detailX, doc.y + 6, { lineGap: 4 });
+
+    // ── Venue section (ONLY for Lunch Pass)
+    if (titleText === 'Lunch Pass') {
+        doc.rect(56, 511, 6, 49).fill('#FFB909'); // Rectangle 3
+        doc.font('Helvetica').fontSize(24).fillColor('#000000')
+            .text('Event  Venue', 64, 531, { width: 225 });
+
+        doc.font('Helvetica').fontSize(24).fillColor('#000000')
+            .text(venue || 'N/A', 142, 570, { width: 600 });
+    }
 
     // ── QR Code Label (Attendance QR Code / Lunch QR code)
     const isLunch = title.includes('Lunch');
@@ -136,6 +145,7 @@ const generateRegistrationPass = async ({
         studentEmail,
         college,
         eventsList,
+        day,
         qrBase64,
         venue, // Pass the venue as is (null for attendance)
         token,

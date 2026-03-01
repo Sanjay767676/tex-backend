@@ -795,9 +795,15 @@ const handleScan = async (token) => {
                     senderType,
                 });
 
-                // 4. Resolve Venue by Event Name
+                // 4. Resolve Venue and Day by Event Name
                 const venueMap = eventConfig.eventVenues || {};
-                let resolvedVenue = eventConfig.lunchVenue || 'Main Block Cafeteria'; // Default to lunch venue
+                let resolvedVenue = eventConfig.lunchVenue || 'N/A';
+
+                // Determine registration day
+                let dayText = 'N/A';
+                if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
+                else if (day1Events.length > 0) dayText = 'Day 1';
+                else if (day2Events.length > 0) dayText = 'Day 2';
 
                 // If the student has specific events, try to find a matching venue
                 for (const event of allEvents) {
@@ -814,7 +820,7 @@ const handleScan = async (token) => {
                     studentEmail,
                     college,
                     department: 'N/A',
-                    day: 'N/A',
+                    day: dayText,
                     eventsList: allEvents,
                     token: lunchToken,
                     qrBase64: lunchQrBase64,
