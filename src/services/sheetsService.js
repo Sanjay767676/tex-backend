@@ -61,7 +61,7 @@ const callWithRetry = async (fn, maxRetries = 4) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const HEADER_CACHE_TTL_MS = 5 * 60 * 1000;
 const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
-const TOKEN_REGEX = /^(CS|NCS)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TOKEN_REGEX = /^(CS|NCS|LUNCH)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CACHE_FILE = path.join(process.cwd(), 'sheet_metadata_cache.json');
 
 // Using cache abstraction (Redis or In-Memory)
@@ -271,6 +271,16 @@ const generateQRCode = async (token, endpoint = 'scan') => {
     const scanUrl = `${process.env.BASE_URL}/${endpoint}?token=${token}`;
     const qrDataUrl = await QRCode.toDataURL(scanUrl);
     return { qrBase64: qrDataUrl, scanUrl };
+};
+
+/**
+ * Exact string match column finder — avoids alias ambiguity.
+ * @param {Array} headers
+ * @param {string} exactHeader
+ * @returns {number} index or -1
+ */
+const exactColumnIndex = (headers, exactHeader) => {
+    return headers.findIndex(h => h && h.trim() === exactHeader);
 };
 
 const updateRowColumns = async (spreadsheetId, rowIndex, updates, headers, headerMap, sheetTitle) => {
@@ -663,59 +673,104 @@ const handleScan = async (token) => {
         console.log(`[Attendance Email] Generating QR and sending email to ${studentEmail}...`);
         const { day1Events, day2Events } = extractEvents(row, headers);
         const allEvents = [...day1Events, ...day2Events];
+        const collegeIdx = getColumnByAlias(headerMap, 'college');
+        const college = collegeIdx === -1 ? 'N/A' : normalizeValue(row[collegeIdx]) || 'N/A';
 
-        generateQRCode(normalizedToken, 'scan').then(({ qrBase64 }) => {
-            console.log(`[Attendance Email] QR generated, sending attendance email...`);
-            return sendAttendanceEmail({
-                senderType,
-                to: studentEmail,
-                name: studentName,
-                day1Events,
-                day2Events,
-                qrBase64,
-            });
-        }).then(() => {
-            console.log(`[Attendance Email] ✅ Attendance email sent successfully to ${studentEmail}`);
+        // Run the email + lunch token generation async in background
+        (async () => {
+            try {
+                // 1. Attendance email
+                const { qrBase64: attendanceQr } = await generateQRCode(normalizedToken, 'scan');
+                await sendAttendanceEmail({
+                    senderType,
+                    to: studentEmail,
+                    name: studentName,
+                    day1Events,
+                    day2Events,
+                    qrBase64: attendanceQr,
+                });
+                console.log(`[Attendance Email] ✅ Attendance email sent to ${studentEmail}`);
 
-            // Generate LUNCH TOKEN immediately after attendance
-            console.log(`[Lunch Token] Generating lunch token for ${studentName}...`);
-            return generateQRCode(normalizedToken, 'lunch');
-        }).then(async ({ qrBase64: lunchQrBase64, scanUrl: lunchScanUrl }) => {
-            // Update sheat with lunch link if column exists
-            const lunchLinkIdx = getColumnByAlias(headerMap, 'lunchLink');
-            if (lunchLinkIdx !== -1) {
-                console.log(`[Lunch Token] 💾 Writing lunch link to sheet for row ${rowIndex}`);
-                await updateRowColumns(spreadsheetId, rowIndex, { lunchLink: lunchScanUrl }, headers, headerMap, sheetTitle);
+                // 2. Generate unique LUNCH token (separate from attendance token)
+                const { randomUUID } = require('crypto');
+                const lunchToken = `LUNCH-${randomUUID()}`;
+                console.log(`[Lunch] Token Generated: ${lunchToken}`);
+
+                // 3. Generate lunch QR pointing to /lunch endpoint
+                const { qrBase64: lunchQrBase64, scanUrl: lunchScanUrl } = await generateQRCode(lunchToken, 'lunch');
+
+                // 4. Write Lunch_QR_Link + Lunch_Status=PENDING using EXACT column names
+                const googleSheets = require('../config/googleSheets');
+                const lunchQrLinkIdx = exactColumnIndex(headers, 'Lunch_QR_Link');
+                const lunchStatusIdx = exactColumnIndex(headers, 'Lunch_Status');
+
+                const sheetUpdates = [];
+                if (lunchQrLinkIdx !== -1) {
+                    sheetUpdates.push({
+                        range: `'${sheetTitle}'!${indexToColumn(lunchQrLinkIdx)}${rowIndex}`,
+                        values: [[lunchScanUrl]],
+                    });
+                }
+                if (lunchStatusIdx !== -1) {
+                    sheetUpdates.push({
+                        range: `'${sheetTitle}'!${indexToColumn(lunchStatusIdx)}${rowIndex}`,
+                        values: [['PENDING']],
+                    });
+                }
+                if (sheetUpdates.length > 0) {
+                    await callWithRetry(() =>
+                        googleSheets.spreadsheets.values.batchUpdate({
+                            spreadsheetId,
+                            requestBody: { valueInputOption: 'USER_ENTERED', data: sheetUpdates },
+                        })
+                    );
+                    console.log(`[Lunch] Sheet Updated — Lunch_QR_Link + Lunch_Status=PENDING for row ${rowIndex}`);
+                } else {
+                    console.warn(`[Lunch] ⚠️ Lunch_QR_Link / Lunch_Status columns not found in sheet headers`);
+                }
+
+                // Cache the lunch token so it resolves on scan
+                await cacheService.set(lunchToken, {
+                    spreadsheetId,
+                    rowIndex,
+                    headers,
+                    headerMap,
+                    sheetTitle,
+                    row,
+                    attendance: true,
+                    lunch: false,
+                    senderType,
+                });
+
+                // 5. Generate lunch PDF from HTML template
+                const lunchPdfBuffer = await generateLunchPass({
+                    studentName,
+                    studentEmail,
+                    college,
+                    department: 'N/A',
+                    day: 'N/A',
+                    eventsList: allEvents,
+                    token: lunchToken,
+                    qrBase64: lunchQrBase64,
+                    venue: 'Main Cafeteria',
+                });
+                console.log(`[Lunch] PDF Created for ${studentName}`);
+
+                // 6. Send lunch email
+                await sendLunchEmail({
+                    senderType,
+                    to: studentEmail,
+                    name: studentName,
+                    token: lunchToken,
+                    pdfBuffer: lunchPdfBuffer,
+                });
+                console.log(`[Lunch] Mail Sent to ${studentEmail}`);
+
+            } catch (err) {
+                console.error(`[Scan Process] ❌ Async flow failed for ${studentEmail}:`, err.message);
             }
+        })();
 
-            // Generate and send Lunch Pass
-            const collegeIdx = getColumnByAlias(headerMap, 'college');
-            const college = collegeIdx === -1 ? 'N/A' : normalizeValue(row[collegeIdx]) || 'N/A';
-
-            const lunchPdfBuffer = await generateLunchPass({
-                studentName,
-                studentEmail,
-                college,
-                department: 'N/A',
-                day: 'N/A',
-                eventsList: allEvents,
-                token: normalizedToken,
-                qrBase64: lunchQrBase64,
-                venue: 'Main Cafeteria'
-            });
-
-            return sendLunchEmail({
-                senderType,
-                to: studentEmail,
-                name: studentName,
-                token: normalizedToken,
-                pdfBuffer: lunchPdfBuffer
-            });
-        }).then(() => {
-            console.log(`[Lunch Token] ✅ Lunch token sent successfully to ${studentEmail}`);
-        }).catch((err) => {
-            console.error(`[Scan Process] ❌ Async flow failed for ${studentEmail}:`, err.message);
-        });
     } else {
         console.warn(`[Attendance Email] ⚠️ No email found for row ${rowIndex} - emailIdx: ${emailIdx}, skipping email send`);
         if (emailIdx !== -1 && row) {
@@ -761,11 +816,20 @@ const handleLunchScan = async (token) => {
         throw error;
     }
 
-    const { rowIndex, headers, headerMap, lunch, sheetTitle, spreadsheetId } = rowInfo;
+    const { rowIndex, headers, headerMap, lunch, sheetTitle, spreadsheetId, senderType: cachedSenderType } = rowInfo;
+    const resolvedSenderType = cachedSenderType || senderType;
 
-    // 3. CHECK LUNCH STATUS
-    if (lunch === true) {
-        const error = new Error('Lunch already scanned');
+    // 3. CHECK LUNCH STATUS using exact column
+    const lunchStatusIdx = exactColumnIndex(headers, 'Lunch_Status');
+    let currentLunchStatus = '';
+    if (lunchStatusIdx !== -1) {
+        const latestRow = rowInfo.row || [];
+        currentLunchStatus = normalizeValue(latestRow[lunchStatusIdx]).toUpperCase();
+    }
+
+    // Prevent double scan — check both cache flag and sheet value
+    if (lunch === true || currentLunchStatus === 'USED') {
+        const error = new Error('Lunch already taken');
         error.statusCode = 409;
         throw error;
     }
@@ -774,14 +838,28 @@ const handleLunchScan = async (token) => {
     rowInfo.lunch = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. UPDATE SHEETS ASYNC
-    markLunchPresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
-        .catch(err => console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message));
+    // 5. UPDATE Lunch_Status = "USED" in sheet using exact column name
+    if (lunchStatusIdx !== -1) {
+        const colLetter = indexToColumn(lunchStatusIdx);
+        callWithRetry(() =>
+            require('../config/googleSheets').spreadsheets.values.update({
+                spreadsheetId,
+                range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: { values: [['USED']] },
+            })
+        ).then(() => {
+            console.log(`[Lunch Scan] Used — row ${rowIndex} Lunch_Status=USED`);
+        }).catch(err => {
+            console.error(`[Sheets Service] Critical lunch status update failure for ${normalizedToken}:`, err.message);
+        });
+    } else {
+        // Fallback: use alias-based mark
+        markLunchPresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
+            .catch(err => console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message));
+    }
 
-    // Optional: Log success (email was sent previously during attendance)
-    console.log(`[Lunch Service] Lunch marked for row ${rowIndex} (${senderType})`);
-
-    return { rowIndex, senderType };
+    return { rowIndex, senderType: resolvedSenderType };
 };
 
 module.exports = {
