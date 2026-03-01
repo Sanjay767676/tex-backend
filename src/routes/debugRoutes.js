@@ -5,7 +5,7 @@ const cacheService = require('../services/cacheService');
 const { env } = require('../config/env');
 
 // Enhanced health check route
-router.get('/health', function(req, res) {
+router.get('/health', function (req, res) {
     try {
         var cacheStats = cacheService.getStats();
 
@@ -29,7 +29,7 @@ router.get('/health', function(req, res) {
                 activeSheets: [
                     ...Object.values(env.csSheets),
                     ...Object.values(env.ncsSheets)
-                ].filter(function(id) { return id && id.trim() !== ''; }).length
+                ].filter(function (id) { return id && id.trim() !== ''; }).length
             },
             uptime: process.uptime(),
             memory: {
@@ -52,7 +52,7 @@ router.get('/health', function(req, res) {
 });
 
 // PDF debug test route - GET /debug/pdf-test?type=attendance or ?type=lunch
-router.get('/debug/pdf-test', async function(req, res) {
+router.get('/debug/pdf-test', async function (req, res) {
     try {
         console.log('[PDF Debug] Generating test PDF...');
 
@@ -96,8 +96,7 @@ router.get('/debug/pdf-test', async function(req, res) {
             message: 'PDF generation failed',
             error: error.message,
             details: {
-                puppeteerInstalled: true,
-                templatesPath: 'templates/',
+                pdfEngine: 'pdfkit',
                 assetsPath: 'assets/'
             }
         });
@@ -105,7 +104,7 @@ router.get('/debug/pdf-test', async function(req, res) {
 });
 
 // Cache debug route - GET /debug/cache
-router.get('/debug/cache', function(req, res) {
+router.get('/debug/cache', function (req, res) {
     try {
         var cacheStats = cacheService.getStats();
         var internalCache = cacheService.getInternalMap();

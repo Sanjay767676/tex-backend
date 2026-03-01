@@ -1,32 +1,45 @@
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
-const fs = require('fs').promises;
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
 const path = require('path');
 
-// Pre-configure @sparticuz/chromium for Azure
-chromium.setHeadlessMode = true;
-chromium.setGraphicsMode = false;
+const assetsPath = path.join(__dirname, '..', '..', 'assets', 'images');
 
 /**
- * Convert image to base64 data URL
+ * Helper to load image buffer from disk
  */
-const imageToBase64 = async (imagePath) => {
+const loadImage = (filename) => {
+    const imgPath = path.join(assetsPath, filename);
     try {
-        const imageBuffer = await fs.readFile(imagePath);
-        const ext = path.extname(imagePath).toLowerCase();
-        const mimeType = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
-        return `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
-    } catch (error) {
-        console.warn(`[PDF Service] Could not load image ${imagePath}:`, error.message);
-        return '';
+        return fs.readFileSync(imgPath);
+    } catch {
+        return null;
     }
 };
 
 /**
- * Generate a professional PDF Registration Pass using HTML template
- * @param {Object} data - Student and event details
- * @param {String} type - Type of PDF: 'attendance' or 'lunch'
- * @returns {Promise<Buffer>} - Resolves to a Buffer containing PDF data
+ * Decode a base64 data URL to a Buffer
+ */
+const dataUrlToBuffer = (dataUrl) => {
+    const base64 = dataUrl.split(',')[1];
+    return Buffer.from(base64, 'base64');
+};
+
+/**
+ * Wrap PDFDocument stream into a Promise<Buffer>
+ */
+const docToBuffer = (doc) =>
+    new Promise((resolve, reject) => {
+        const chunks = [];
+        doc.on('data', (chunk) => chunks.push(chunk));
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
+    });
+
+/**
+ * Generate a Registration Pass PDF using PDFKit
+ * @param {Object} data
+ * @param {String} type - 'attendance' or 'lunch'
+ * @returns {Promise<Buffer>}
  */
 const generateRegistrationPass = async ({
     studentName,
@@ -39,117 +52,113 @@ const generateRegistrationPass = async ({
     qrBase64,
     venue
 }, type = 'attendance') => {
-    let browser = null;
-    
-    try {
-        // Read the appropriate HTML template
-        const templatePath = path.join(__dirname, '..', '..', 'templates', type, `${type}.html`);
-        let htmlTemplate = await fs.readFile(templatePath, 'utf-8');
-        
-        // Read and convert images to base64
-        const assetsPath = path.join(__dirname, '..', '..', 'assets', 'images');
-        const snsEmblem = await imageToBase64(path.join(assetsPath, 'sns_emblem.png'));
-        const texperiaLogo = await imageToBase64(path.join(assetsPath, 'texperia_logo.png'));
-        const snsInstitutionsLogo = await imageToBase64(path.join(assetsPath, 'SNS_institutions_logo.png'));
-        
-        // Prepare event list as string
-        const eventsText = eventsList && eventsList.length > 0 
-            ? eventsList.join(', ') 
-            : 'No specific events selected';
-        
-        // Replace template variables
-        htmlTemplate = htmlTemplate
-            .replace(/{{name}}/g, studentName || 'N/A')
-            .replace(/{{email}}/g, studentEmail || 'N/A')
-            .replace(/{{college}}/g, college || 'N/A')
-            .replace(/{{event}}/g, eventsText)
-            .replace(/{{qrCode}}/g, qrBase64)
-            .replace(/{{venue}}/g, venue || 'Main Hall')
-            // Replace image sources with base64 data URLs
-            .replace(/src="\/assets\/images\/sns_emblem\.png"/g, `src="${snsEmblem}"`)
-            .replace(/src="\/assets\/images\/texperia_logo\.png"/g, `src="${texperiaLogo}"`)
-            .replace(/src="\/assets\/images\/SNS_institutions_logo\.png"/g, `src="${snsInstitutionsLogo}"`);
+    const doc = new PDFDocument({ size: 'A4', margin: 0 });
+    const bufferPromise = docToBuffer(doc);
 
-        // Inline CSS to avoid external file dependencies
-        const cssPath = path.join(__dirname, '..', '..', 'assets', 'css', 'pdf-style.css');
-        const cssContent = await fs.readFile(cssPath, 'utf-8');
-        
-        // Replace the CSS link with inline styles
-        htmlTemplate = htmlTemplate.replace(
-            /<link rel="stylesheet" href="\/assets\/css\/pdf-style\.css">/g, 
-            `<style>${cssContent}</style>`
-        );
+    const W = 595.28; // A4 width in points
+    const H = 841.89; // A4 height in points
 
-        // Launch Puppeteer with @sparticuz/chromium (works on Azure without system Chrome)
-        const executablePath = await chromium.executablePath();
-        console.log(`[PDF Service] Launching Chromium from: ${executablePath}`);
-        
-        browser = await puppeteer.launch({
-            executablePath,
-            headless: chromium.headless,
-            args: chromium.args,
-            defaultViewport: chromium.defaultViewport
+    const snsEmblem = loadImage('sns_emblem.png');
+    const texperiaLogo = loadImage('texperia_logo.png');
+    const snsInstitutions = loadImage('SNS_institutions_logo.png');
+    const qrBuffer = dataUrlToBuffer(qrBase64);
+
+    // ── Background ─────────────────────────
+    doc.rect(0, 0, W, H).fill('#ffffff');
+
+    // ── Gold top bar ───────────────────────
+    doc.rect(0, 0, W, 8).fill('#FFB909');
+
+    // ── Header logos ──────────────────────
+    if (snsEmblem) doc.image(snsEmblem, 20, 15, { height: 80 });
+    if (texperiaLogo) doc.image(texperiaLogo, W / 2 - 120, -20, { width: 240 });
+    if (snsInstitutions) doc.image(snsInstitutions, W - 160, 15, { height: 75 });
+
+    // ── Header divider ─────────────────────
+    doc.moveTo(20, 105).lineTo(W - 20, 105).strokeColor('#FFB909').lineWidth(2).stroke();
+
+    // ── Title ──────────────────────────────
+    const title = type === 'lunch' ? 'Lunch Token' : 'Registration Pass';
+    doc.font('Helvetica-Bold').fontSize(26).fillColor('#1a1a1a')
+        .text(title, 0, 120, { align: 'center' });
+
+    // ── Gold accent bar under title ────────
+    doc.rect(W / 2 - 60, 155, 120, 4).fill('#FFB909');
+
+    // ── Details Section ────────────────────
+    let y = 185;
+    const labelX = 50;
+    const valueX = 200;
+
+    const drawRow = (label, value) => {
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('#666666')
+            .text(label.toUpperCase(), labelX, y);
+        doc.font('Helvetica').fontSize(13).fillColor('#111111')
+            .text(value || 'N/A', valueX, y - 1, { width: 300 });
+        y += 32;
+    };
+
+    drawRow('Name', studentName);
+    drawRow('Email', studentEmail);
+    drawRow('College', college);
+    if (department && department !== 'N/A') drawRow('Department', department);
+    if (type === 'attendance') drawRow('Day', day || 'N/A');
+
+    // ── Events / Venue section ─────────────
+    if (eventsList && eventsList.length > 0) {
+        doc.moveTo(labelX, y).lineTo(W - labelX, y).strokeColor('#eeeeee').lineWidth(1).stroke();
+        y += 15;
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('#666666').text('EVENTS', labelX, y);
+        y += 16;
+        eventsList.forEach(ev => {
+            doc.font('Helvetica').fontSize(12).fillColor('#111111')
+                .text(`• ${ev}`, labelX + 10, y);
+            y += 20;
         });
-
-        const page = await browser.newPage();
-        
-        // Set the HTML content
-        await page.setContent(htmlTemplate, { waitUntil: 'networkidle0' });
-        
-        // Generate PDF
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: {
-                top: 0,
-                bottom: 0,
-                left: 0,
-                right: 0
-            }
-        });
-
-        return pdfBuffer;
-        
-    } catch (error) {
-        console.error('[PDF Service] Error generating PDF:', error);
-        throw error;
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
     }
+
+    if (venue && venue !== 'N/A') {
+        y += 5;
+        drawRow('Venue', venue);
+    }
+
+    // ── Divider ────────────────────────────
+    doc.moveTo(labelX, y + 10).lineTo(W - labelX, y + 10).strokeColor('#eeeeee').lineWidth(1).stroke();
+    y += 30;
+
+    // ── QR Code ───────────────────────────
+    const qrLabel = type === 'lunch' ? 'Lunch QR Code' : 'Scan QR Code';
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#666666')
+        .text(qrLabel.toUpperCase(), 0, y, { align: 'center' });
+    y += 16;
+
+    if (qrBuffer) {
+        const qrSize = 180;
+        doc.image(qrBuffer, W / 2 - qrSize / 2, y, { width: qrSize, height: qrSize });
+        y += qrSize + 10;
+    }
+
+    // Token below QR
+    doc.font('Helvetica').fontSize(9).fillColor('#999999')
+        .text(token || '', 0, y, { align: 'center' });
+
+    // ── Gold footer bar ────────────────────
+    doc.rect(0, H - 44, W, 44).fill('#FACB01');
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#1a1a1a')
+        .text('SNS College of Technology — Texperia 2026', 0, H - 28, { align: 'center' });
+
+    doc.end();
+    return bufferPromise;
 };
 
 /**
- * Generate a lunch token PDF using lunch HTML template
- * @param {Object} data - Student and event details
- * @returns {Promise<Buffer>} - Resolves to a Buffer containing PDF data
+ * Generate a Lunch Pass PDF
  */
-const generateLunchPass = async ({
-    studentName,
-    studentEmail,
-    college,
-    department,
-    day,
-    eventsList,
-    token,
-    qrBase64,
-    venue
-}) => {
-    return await generateRegistrationPass({
-        studentName,
-        studentEmail,
-        college,
-        department,
-        day,
-        eventsList,
-        token,
-        qrBase64,
-        venue
-    }, 'lunch');
+const generateLunchPass = async (data) => {
+    return generateRegistrationPass(data, 'lunch');
 };
 
 module.exports = {
     generateRegistrationPass,
-    generateLunchPass
+    generateLunchPass,
 };
