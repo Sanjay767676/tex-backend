@@ -120,6 +120,8 @@ const columnAliases = {
     // College column variations
     college: [
         'College :',
+        'Name of the College :',
+        'Name of the College',
         'College Name',
         'College',
         'Name of the College',
@@ -127,6 +129,7 @@ const columnAliases = {
         'Institution Name',
         'College/Institute',
     ],
+
 
     // Lunch column variations
     lunch: [

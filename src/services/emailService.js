@@ -1,87 +1,53 @@
-const nodemailer = require('nodemailer');
-const dns = require('dns');
-const { promisify } = require('util');
+/**
+ * Create a Nodemailer transporter using smtp.gmail.com hostname directly.
+ * Using pool:true for connection reuse.
+ */
+const createTransporter = (user, pass) => {
+    return nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: { user, pass },
+        pool: true,
+        maxConnections: 5,
+        maxMessages: 50,
+        connectionTimeout: 30000,
+        greetingTimeout: 15000,
+        socketTimeout: 45000,
+    });
+};
 
-const resolve4 = promisify(dns.resolve4);
-
-// Cache resolved IPv4 address and transporters
-let gmailIPv4 = null;
+// Lazy-initialized singleton transporters
 let csTransporter = null;
 let ncsTransporter = null;
 
 /**
- * Resolve Gmail SMTP IPv4 address once and cache it
+ * Get or create transporter for sender type (lazy-initialized singleton)
  */
-const resolveGmailIPv4 = async () => {
-    if (gmailIPv4) return gmailIPv4;
-
-    try {
-        const addresses = await resolve4('smtp.gmail.com');
-        gmailIPv4 = addresses[0];
-        console.log(`[SMTP] Resolved smtp.gmail.com → ${gmailIPv4}`);
-        return gmailIPv4;
-    } catch (error) {
-        console.warn('[SMTP] Gmail IPv4 resolution failed, using hostname');
-        return 'smtp.gmail.com';
-    }
-};
-
-/**
- * Enhanced transporter creation with IPv4 resolution
- */
-const createTransporter = async (user, pass, label) => {
-    const host = await resolveGmailIPv4();
-
-    const transporter = nodemailer.createTransport({
-        host,
-        port: 465,
-        secure: true,
-        auth: { user, pass },
-        connectionTimeout: 30000,
-        greetingTimeout: 15000,
-        socketTimeout: 45000,
-        logger: false,
-        debug: false,
-        pool: true,
-        maxConnections: 5,
-        maxMessages: 50,
-        rateLimit: 10,
-        rateDelta: 1000,
-    });
-
-    // Test connection
-    try {
-        await transporter.verify();
-        console.log(`[SMTP] ${label} Ready (port 465, IPv4)`);
-        return transporter;
-    } catch (error) {
-        console.error(`[SMTP] ${label} Connection Failed:`, error.message);
-        throw error;
-    }
-};
-
-/**
- * Get or create transporter for sender type
- */
-const getTransporter = async (senderType) => {
+const getTransporter = (senderType) => {
     const isNCS = senderType === 'NCS';
 
-    if (isNCS && !ncsTransporter) {
-        ncsTransporter = await createTransporter(
-            process.env.NCS_EMAIL_USER,
-            process.env.NCS_EMAIL_PASS,
-            'NCS'
-        );
-    } else if (!isNCS && !csTransporter) {
-        csTransporter = await createTransporter(
-            process.env.CS_EMAIL_USER,
-            process.env.CS_EMAIL_PASS,
-            'CS'
-        );
+    if (isNCS) {
+        if (!ncsTransporter) {
+            ncsTransporter = createTransporter(
+                process.env.NCS_EMAIL_USER,
+                process.env.NCS_EMAIL_PASS
+            );
+            console.log('[SMTP] NCS transporter created (smtp.gmail.com:465)');
+        }
+        return ncsTransporter;
+    } else {
+        if (!csTransporter) {
+            csTransporter = createTransporter(
+                process.env.CS_EMAIL_USER,
+                process.env.CS_EMAIL_PASS
+            );
+            console.log('[SMTP] CS transporter created (smtp.gmail.com:465)');
+        }
+        return csTransporter;
     }
-
-    return isNCS ? ncsTransporter : csTransporter;
 };
+
 
 /**
  * Enhanced email template with plain text version for spam prevention
@@ -317,7 +283,7 @@ const sendAttendanceEmail = async ({
 
     const allEvents = [...day1Events, ...day2Events];
     const eventsHtml = allEvents.length > 0
-        ? '<ul style="padding-left: 20px;">' + allEvents.map(function(e) { return '<li>' + e + '</li>'; }).join('') + '</ul>'
+        ? '<ul style="padding-left: 20px;">' + allEvents.map(function (e) { return '<li>' + e + '</li>'; }).join('') + '</ul>'
         : '<p>Standard Admission</p>';
 
     const qrCid = 'entry-qr-code';
