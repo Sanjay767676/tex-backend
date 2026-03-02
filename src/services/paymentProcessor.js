@@ -18,10 +18,7 @@ const processPayments = async () => {
             { id: env.ncsSheets.hackathon, type: 'NCS', name: 'NCS Hackathon' },
         ];
 
-        // Include the testing sheet if configured
-        if (env.testSheetId) {
-            sheetConfigs.push({ id: env.testSheetId, type: 'CS', name: 'Testing Sheet' });
-        }
+        // Include the testing sheet if configured (Removed as requested)
 
         console.log(`[Payment Processor] Starting automatic payment check across ${sheetConfigs.length} sheets...`);
 

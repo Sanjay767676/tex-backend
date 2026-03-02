@@ -13,6 +13,11 @@ const scanLimiter = rateLimit({
     max: 120,
     standardHeaders: true,
     legacyHeaders: false,
+    // Custom key generator to avoid 'ERR_ERL_INVALID_IP_ADDRESS' in some environments
+    keyGenerator: (req) => {
+        return req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress;
+    },
+    validate: { xForwardedForHeader: false }
 });
 
 router.post('/scan', scanLimiter, async (req, res) => {

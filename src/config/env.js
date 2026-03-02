@@ -17,7 +17,7 @@ const testMode = process.env.TEST_MODE === 'true';
 // Sheet IDs required based on mode
 const requiredSheets = testMode ? [
     'TEST_CS_EVENTS_SHEET_ID',
-    'TEST_CS_WORKSHOP_SHEET_ID', 
+    'TEST_CS_WORKSHOP_SHEET_ID',
     'TEST_CS_HACKATHON_SHEET_ID',
     'TEST_NCS_EVENTS_SHEET_ID',
     'TEST_NCS_WORKSHOP_SHEET_ID',
@@ -97,7 +97,6 @@ const env = {
     csEmailPass: String(testMode && process.env.TEST_CS_EMAIL_PASS ? process.env.TEST_CS_EMAIL_PASS : process.env.CS_EMAIL_PASS || '').trim(),
     ncsEmailUser: String(testMode && process.env.TEST_NCS_EMAIL_USER ? process.env.TEST_NCS_EMAIL_USER : process.env.NCS_EMAIL_USER || '').trim(),
     ncsEmailPass: String(testMode && process.env.TEST_NCS_EMAIL_PASS ? process.env.TEST_NCS_EMAIL_PASS : process.env.NCS_EMAIL_PASS || '').trim(),
-    testSheetId: String(process.env.TEST_SHEET_ID || '').trim(),
 };
 
 module.exports = {

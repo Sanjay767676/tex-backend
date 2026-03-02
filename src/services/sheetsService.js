@@ -20,21 +20,54 @@ const eventConfig = require('../config/eventConfig.json');
 const SHEET_NAME = 'A:ZZ';
 
 // ─── Rate limiting & write-queue ───────────────────────────────────────────
-const MIN_REQUEST_GAP_MS = 1500; // minimum ms between Sheets API calls
+const MIN_REQUEST_GAP_MS = 1000;
 let lastRequestTime = 0;
 
-const throttle = () => {
+// ─── Token Bucket Rate Limiter ──────────────────────────────────────────────
+class TokenBucket {
+    constructor(limit, interval) {
+        this.limit = limit;
+        this.interval = interval;
+        this.tokens = limit;
+        this.lastRefill = Date.now();
+    }
+
+    async consume() {
+        this.refill();
+        if (this.tokens < 1) {
+            const waitTime = this.interval / this.limit;
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            return this.consume();
+        }
+        this.tokens -= 1;
+    }
+
+    refill() {
+        const now = Date.now();
+        const elapsed = now - this.lastRefill;
+        const refillAmount = Math.floor(elapsed * (this.limit / this.interval));
+        if (refillAmount > 0) {
+            this.tokens = Math.min(this.limit, this.tokens + refillAmount);
+            this.lastRefill = now;
+        }
+    }
+}
+
+const requestLimiter = new TokenBucket(50, 60000); // 50 requests per minute
+
+const throttle = async () => {
+    await requestLimiter.consume();
     const now = Date.now();
     const wait = Math.max(0, MIN_REQUEST_GAP_MS - (now - lastRequestTime));
     lastRequestTime = now + wait;
-    return wait > 0 ? new Promise(resolve => setTimeout(resolve, wait)) : Promise.resolve();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
 };
 
 /**
  * Wraps a Sheets API call with throttling + exponential back-off retry.
  * Retries on 429 (rate limit) and 503 (service unavailable / quota).
  */
-const callWithRetry = async (fn, maxRetries = 4) => {
+const callWithRetry = async (fn, maxRetries = 8) => {
     let attempt = 0;
     while (true) {
         await throttle();
@@ -60,30 +93,56 @@ const callWithRetry = async (fn, maxRetries = 4) => {
 };
 
 /**
- * Basic write-queue to ensure serialized updates and no dropped requests.
+ * Consolidates multiple row updates into a single batchUpdate call every few seconds.
  */
-class WriteQueue {
-    constructor() {
-        this.queue = Promise.resolve();
+class UpdateBatcher {
+    constructor(delayMs = 5000) {
+        this.delayMs = delayMs;
+        this.batches = new Map(); // spreadsheetId -> { timeout, updates: [{range, values}] }
     }
 
-    add(fn) {
-        this.queue = this.queue.then(async () => {
-            try {
-                return await fn();
-            } catch (err) {
-                console.error('[Write Queue] Error executing task:', err.message);
-                // We don't want to break the whole chain if one write fails, 
-                // but we should log it. callWithRetry handles internal retries.
-            }
-        });
-        return this.queue;
+    add(spreadsheetId, range, values, callback) {
+        if (!this.batches.has(spreadsheetId)) {
+            this.batches.set(spreadsheetId, {
+                updates: [],
+                callbacks: [],
+                timeout: setTimeout(() => this.flush(spreadsheetId), this.delayMs)
+            });
+        }
+
+        const batch = this.batches.get(spreadsheetId);
+        batch.updates.push({ range, values });
+        if (callback) batch.callbacks.push(callback);
+    }
+
+    async flush(spreadsheetId) {
+        const batch = this.batches.get(spreadsheetId);
+        if (!batch || batch.updates.length === 0) return;
+
+        this.batches.delete(spreadsheetId);
+
+        try {
+            console.log(`[Batcher] 🚀 Flushing ${batch.updates.length} updates to ${spreadsheetId}`);
+            const result = await callWithRetry(() =>
+                sheets.spreadsheets.values.batchUpdate({
+                    spreadsheetId,
+                    requestBody: {
+                        valueInputOption: 'USER_ENTERED',
+                        data: batch.updates,
+                    },
+                })
+            );
+            batch.callbacks.forEach(cb => cb(null, result.data));
+        } catch (err) {
+            console.error(`[Batcher] ❌ Batch update failed for ${spreadsheetId}:`, err.message);
+            batch.callbacks.forEach(cb => cb(err));
+        }
     }
 }
 
-const globalWriteQueue = new WriteQueue();
+const batcher = new UpdateBatcher();
 // ─────────────────────────────────────────────────────────────────────────────
-const HEADER_CACHE_TTL_MS = 5 * 60 * 1000;
+const HEADER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
 const TOKEN_REGEX = /^(CS--|CSL-|NCSL-|NCS--|NCS-|LUNCH-)[a-f0-9]{8}/i;
 const CACHE_FILE = path.join(process.cwd(), 'sheet_metadata_cache.json');
@@ -307,34 +366,21 @@ const exactColumnIndex = (headers, exactHeader) => {
     return headers.findIndex(h => h && h.trim() === exactHeader);
 };
 
-const updateRowColumns = async (spreadsheetId, rowIndex, updates, headers, headerMap, sheetTitle) => {
-    const data = [];
+const updateRowColumns = (spreadsheetId, rowIndex, updates, headers, headerMap, sheetTitle) => {
+    return new Promise((resolve, reject) => {
+        const data = [];
 
-    Object.entries(updates).forEach(([aliasKey, value]) => {
-        const colLetter = getColumnLetterByAlias(headers, headerMap, aliasKey);
-        if (colLetter) {
-            data.push({
-                range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
-                values: [[value]],
-            });
-        }
-    });
-
-    if (data.length === 0) return null;
-
-    // Use global write queue to prevent dropped updates during high flow
-    return globalWriteQueue.add(async () => {
-        const response = await callWithRetry(() =>
-            sheets.spreadsheets.values.batchUpdate({
-                spreadsheetId,
-                requestBody: {
-                    valueInputOption: 'USER_ENTERED',
-                    data,
-                },
-            })
-        );
-        console.log(`[Sheets Service] ✅ Write Queue: Updated row ${rowIndex} in ${spreadsheetId}`);
-        return response.data;
+        Object.entries(updates).forEach(([aliasKey, value]) => {
+            const colLetter = getColumnLetterByAlias(headers, headerMap, aliasKey);
+            if (colLetter) {
+                batcher.add(
+                    spreadsheetId,
+                    `'${sheetTitle}'!${colLetter}${rowIndex}`,
+                    [[value]],
+                    (err, result) => (err ? reject(err) : resolve(result))
+                );
+            }
+        });
     });
 };
 
@@ -479,95 +525,82 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
     return processed;
 };
 
-/**
- * Warms up the in-memory cache by fetching tokens from all configured sheets.
- * Enhanced with TEST_MODE support and better error handling.
- */
 const warmUpCache = async () => {
     if (isCacheWarming) return;
     isCacheWarming = true;
-    console.log('[Sheets Service] 🚀 Warming up registration cache...');
-    console.log(`[Sheets Service] Mode: ${env.testMode ? '🧪 TEST' : '🚀 PRODUCTION'}`);
 
-    const allSheetIds = [
-        ...Object.values(env.csSheets),
-        ...Object.values(env.ncsSheets),
-        env.testSheetId
-    ].filter(id => id && id.trim() !== '');
+    try {
+        console.log('[Sheets Service] 🚀 Warming up registration cache...');
+        console.log(`[Sheets Service] Mode: ${env.testMode ? '🧪 TEST' : '🚀 PRODUCTION'}`);
 
-    console.log(`[Sheets Service] Fetching from ${allSheetIds.length} sheets:`, allSheetIds);
+        const allSheetIds = [
+            ...Object.values(env.csSheets),
+            ...Object.values(env.ncsSheets)
+        ].filter(id => id && id.trim() !== '');
 
-    let totalTokens = 0;
+        console.log(`[Sheets Service] Fetching from ${allSheetIds.length} sheets:`, allSheetIds);
 
-    for (const spreadsheetId of allSheetIds) {
-        try {
-            console.log(`[Sheets Service] Processing sheet: ${spreadsheetId}`);
+        const sheetContexts = [];
 
-            const { headerMap } = await getHeaderInfo(spreadsheetId);
-            const cachedMetadata = metadataCache.get(spreadsheetId);
-            const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
+        // Phase 1: Get titles and headers in parallel
+        for (const spreadsheetId of allSheetIds) {
+            try {
+                const { headers, headerMap } = await getHeaderInfo(spreadsheetId);
+                const cachedMetadata = metadataCache.get(spreadsheetId);
+                const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
 
-            const tokenIdx = getColumnByAlias(headerMap, 'token');
-            const attendanceIdx = getColumnByAlias(headerMap, 'attendance');
-            const lunchIdx = getColumnByAlias(headerMap, 'lunch');
-
-            if (tokenIdx === -1) {
-                console.warn(`[Sheets Service] No token column found in sheet ${spreadsheetId}`);
-                continue;
-            }
-
-            const rows = await getSheetRows(spreadsheetId, `'${sheetTitle}'!${SHEET_NAME}`);
-            if (rows.length < 2) {
-                console.log(`[Sheets Service] No data rows in sheet ${spreadsheetId}`);
-                continue;
-            }
-
-            console.log(`[Sheets Service] Found ${rows.length - 1} data rows in sheet ${spreadsheetId}`);
-
-            const headers = rows[0];
-            let sheetTokens = 0;
-
-            rows.slice(1).forEach((row, index) => {
-                const token = normalizeValue(row[tokenIdx]);
-                if (token && isValidToken(token)) {
-                    const attendanceVal = attendanceIdx !== -1 ? normalizeValue(row[attendanceIdx]).toUpperCase() : '';
-                    const lunchVal = lunchIdx !== -1 ? normalizeValue(row[lunchIdx]).toUpperCase() : '';
-
-                    cacheService.set(token, {
-                        spreadsheetId,
-                        rowIndex: index + 2,
-                        headers,
-                        headerMap,
-                        sheetTitle,
-                        row,
-                        attendance: attendanceVal === 'PRESENT',
-                        lunch: ['PRESENT', 'SCANNED', 'TRUE', 'TAKEN'].includes(lunchVal) || (lunchVal !== '' && lunchVal !== 'ABSENT' && lunchVal !== 'FALSE')
-                    });
-                    sheetTokens++;
-                    totalTokens++;
-                }
-            });
-
-            console.log(`[Sheets Service] ✅ Sheet ${spreadsheetId}: ${sheetTokens} tokens cached`);
-
-        } catch (err) {
-            console.error(`[Sheets Service] ❌ Warmup failed for sheet ${spreadsheetId}:`, err.message);
-
-            // Check for common Google Sheets API errors
-            if (err.message.includes('Unable to parse range')) {
-                console.error(`[Sheets Service] 🔍 Sheet format issue - check if sheet has proper structure`);
-            } else if (err.message.includes('not found')) {
-                console.error(`[Sheets Service] 🔍 Sheet not found - verify spreadsheet ID: ${spreadsheetId}`);
-            } else if (err.message.includes('permission')) {
-                console.error(`[Sheets Service] 🔍 Permission denied - check service account access for: ${spreadsheetId}`);
-            } else if (err.message.includes('Quota')) {
-                console.error(`[Sheets Service] 🔍 API Quota exceeded - reduce request frequency`);
+                sheetContexts.push({
+                    spreadsheetId,
+                    headers,
+                    headerMap,
+                    sheetTitle,
+                    tokenIdx: getColumnByAlias(headerMap, 'token'),
+                    attendanceIdx: getColumnByAlias(headerMap, 'attendance'),
+                    lunchIdx: getColumnByAlias(headerMap, 'lunch')
+                });
+            } catch (err) {
+                console.warn(`[Warmup] ⚠️ Failed for ${spreadsheetId}: ${err.message}`);
             }
         }
-    }
 
-    console.log(`[Sheets Service] ✅ Cache warmed up. Total tokens loaded: ${totalTokens}`);
-    isCacheWarming = false;
+        // Phase 2: Batch fetch data for all sheets
+        let totalTokens = 0;
+        for (const ctx of sheetContexts) {
+            if (ctx.tokenIdx === -1) continue;
+
+            const rows = await getSheetRows(ctx.spreadsheetId, `'${ctx.sheetTitle}'!${SHEET_NAME}`);
+            if (rows && rows.length > 1) {
+                let sheetTokens = 0;
+                rows.slice(1).forEach((row, i) => {
+                    const rowIndex = i + 2;
+                    const token = normalizeValue(row[ctx.tokenIdx]);
+                    if (token && isValidToken(token)) {
+                        const attendanceVal = ctx.attendanceIdx !== -1 ? normalizeValue(row[ctx.attendanceIdx]).toUpperCase() : '';
+                        const lunchVal = ctx.lunchIdx !== -1 ? normalizeValue(row[ctx.lunchIdx]).toUpperCase() : '';
+
+                        cacheService.set(token, {
+                            spreadsheetId: ctx.spreadsheetId,
+                            rowIndex,
+                            headers: ctx.headers,
+                            headerMap: ctx.headerMap,
+                            sheetTitle: ctx.sheetTitle,
+                            row,
+                            attendance: attendanceVal === 'PRESENT',
+                            lunch: ['PRESENT', 'SCANNED', 'TRUE', 'TAKEN'].includes(lunchVal) || (lunchVal !== '' && lunchVal !== 'ABSENT' && lunchVal !== 'FALSE')
+                        });
+                        sheetTokens++;
+                        totalTokens++;
+                    }
+                });
+                console.log(`[Warmup] ✅ Sheet ${ctx.spreadsheetId}: ${sheetTokens} tokens`);
+            }
+        }
+        console.log(`[Sheets Service] ✨ Warmup complete. Total: ${totalTokens}`);
+    } catch (error) {
+        console.error('[Sheets Service] ❌ Warmup failed:', error.message);
+    } finally {
+        isCacheWarming = false;
+    }
 };
 
 // Start warmup on init and setup periodic refresh
@@ -725,7 +758,7 @@ const handleScan = async (token, secret) => {
     rowInfo.attendance = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. UPDATE SHEETS ASYNC (Via global queue)
+    // 5. UPDATE SHEETS ASYNC (Internally queued in updateRowColumns)
     markAttendancePresent(spreadsheetId, rowIndex, headers, headerMap, sheetTitle, normalizedToken)
         .catch(err => console.error(`[Sheets Service] Queue execution failure for ${normalizedToken}:`, err.message));
 
@@ -949,15 +982,10 @@ const handleLunchScan = async (token, secret) => {
     rowInfo.lunch = true;
     await cacheService.set(normalizedToken, rowInfo);
 
-    // 5. QUEUE UPDATE IN SHEET
-    globalWriteQueue.add(async () => {
-        try {
-            await updateRowColumns(spreadsheetId, rowIndex, { lunch: 'TAKEN' }, headers, headerMap, sheetTitle);
-            console.log(`[Lunch Scan] ✅ lunch token marked — row ${rowIndex}`);
-        } catch (err) {
-            console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message);
-        }
-    });
+    // 5. QUEUE UPDATE IN SHEET (No longer nested in globalWriteQueue.add)
+    updateRowColumns(spreadsheetId, rowIndex, { lunch: 'TAKEN' }, headers, headerMap, sheetTitle)
+        .then(() => console.log(`[Lunch Scan] ✅ lunch token marked — row ${rowIndex}`))
+        .catch(err => console.error(`[Sheets Service] Critical lunch update failure for ${normalizedToken}:`, err.message));
 
     return {
         message: 'Marked lunch',
