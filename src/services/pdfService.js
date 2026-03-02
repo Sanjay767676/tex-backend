@@ -52,6 +52,10 @@ const buildPDF = async ({
     const doc = new PDFDocument({ size: [W, H], margin: 0, autoFirstPage: true });
     const bufferPromise = docToBuffer(doc);
 
+    const fontsPath = path.join(__dirname, '..', '..', 'assets', 'fonts');
+    doc.registerFont('Lora', path.join(fontsPath, 'Lora-Regular.ttf'));
+    doc.registerFont('Lora-Bold', path.join(fontsPath, 'Lora-Bold.ttf'));
+
     const snsEmblem = loadImage('sns_emblem.png');
     const texperiaLogo = loadImage('texperia_logo.png');
     const snsInstitutions = loadImage('SNS_institutions_logo.png');
@@ -67,52 +71,42 @@ const buildPDF = async ({
 
     // ── Title (Registration Pass / Lunch Pass)
     const titleText = title === 'Registration Pass' ? 'Registration Pass' : 'Lunch Pass';
-    doc.font('Helvetica-Bold').fontSize(32).fillColor('#000000')
-        .text(titleText, 260, 305, { width: 295, align: 'center' });
+    doc.font('Lora-Bold').fontSize(32).fillColor('#000000')
+        .text(titleText, 0, 305, { width: 794, align: 'center' });
 
     // ── Student Details Header
     doc.rect(56, 351, 6, 49).fill('#FFB909'); // Rectangle 2
-    doc.font('Helvetica').fontSize(24).fillColor('#000000')
-        .text('Student Details :', 64, 373, { width: 185 });
+    doc.font('Lora-Bold').fontSize(24).fillColor('#000000')
+        .text('Student Details :', 74, 363, { width: 200 });
 
     // ── Student Details Content
     const detailY = 412;
     const detailX = 142;
-    const formattedDay = day ? (day.includes('Day') ? day : `Day ${day}`) : '';
+    const formattedDay = day ? (day.includes('Day') ? day : `Day ${day}`) : 'N/A';
     const eventsText = eventsList && eventsList.length > 0 ? eventsList.join('\n') : 'Texperia 2026';
 
-    doc.font('Helvetica').fontSize(24).fillColor('#000000')
-        .text(`Name : ${studentName}`, detailX, detailY, { width: 450 })
-        .text(`Email : ${studentEmail}`, detailX, doc.y + 6)
-        .text(`College : ${college}`, detailX, doc.y + 6);
+    doc.font('Lora').fontSize(20).fillColor('#000000');
 
-    if (formattedDay) {
-        doc.text(`Day : ${formattedDay}`, detailX, doc.y + 6);
-    }
+    // Render details with consistent spacing to avoid overlap
+    doc.text(`Name : ${studentName}`, detailX, detailY);
+    doc.text(`Email : ${studentEmail}`, detailX, doc.y + 10);
+    doc.text(`College : ${college}`, detailX, doc.y + 10);
+    doc.text(`Day : ${formattedDay}`, detailX, doc.y + 10);
 
-    // Add Event List to Student Details section as requested
-    doc.text(`Event : ${eventsText}`, detailX, doc.y + 6, { lineGap: 4 });
-
-    // ── Venue section (ONLY for Lunch Pass)
-    if (titleText === 'Lunch Pass') {
-        doc.rect(56, 511, 6, 49).fill('#FFB909'); // Rectangle 3
-        doc.font('Helvetica').fontSize(24).fillColor('#000000')
-            .text('Event  Venue', 64, 531, { width: 225 });
-
-        doc.font('Helvetica').fontSize(24).fillColor('#000000')
-            .text(venue || 'N/A', 142, 570, { width: 600 });
-    }
+    // Aligned event section
+    const eventsY = doc.y + 10;
+    doc.text(`Event :`, detailX, eventsY);
+    doc.text(eventsText, detailX + 70, eventsY, { width: 500, lineGap: 2 });
 
     // ── QR Code Label (Attendance QR Code / Lunch QR code)
     const isLunch = title.includes('Lunch');
     const qrLabel = isLunch ? 'Lunch QR code' : 'Attendance QR Code';
-    doc.font('Helvetica').fontSize(24).fillColor('#000000')
-        .text(qrLabel, 281, 691, { width: 259, align: 'center' });
+    doc.font('Lora-Bold').fontSize(20).fillColor('#000000')
+        .text(qrLabel, 0, 691, { width: 794, align: 'center' });
 
     // ── QR Image
     if (qrBuffer) {
-        // Lunch QR is specific size in HTML, using similar for both
-        const qrSize = isLunch ? { w: 263, h: 247, x: 249, y: 715 } : { w: 220, h: 220, x: 287, y: 735 };
+        const qrSize = { w: 220, h: 220, x: 287, y: 735 };
         doc.image(qrBuffer, qrSize.x, qrSize.y, { width: qrSize.w, height: qrSize.h });
     }
 

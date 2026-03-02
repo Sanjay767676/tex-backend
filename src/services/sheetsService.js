@@ -85,7 +85,7 @@ const globalWriteQueue = new WriteQueue();
 // ─────────────────────────────────────────────────────────────────────────────
 const HEADER_CACHE_TTL_MS = 5 * 60 * 1000;
 const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
-const TOKEN_REGEX = /^(CS|NCS|LUNCH)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TOKEN_REGEX = /^(CS--|CSL-|NCSL-|NCS--|NCS-|LUNCH-)[a-f0-9]{8}/i;
 const CACHE_FILE = path.join(process.cwd(), 'sheet_metadata_cache.json');
 
 // Using cache abstraction (Redis or In-Memory)
@@ -282,9 +282,9 @@ const extractEvents = (row, headers) => {
 
         const dayType = getDayType(header);
         if (dayType === 'day1') {
-            day1Events.push(cellValue);
+            day1Events.push(header); // Push the event name (header)
         } else if (dayType === 'day2') {
-            day2Events.push(cellValue);
+            day2Events.push(header); // Push the event name (header)
         }
     });
 
@@ -338,9 +338,22 @@ const updateRowColumns = async (spreadsheetId, rowIndex, updates, headers, heade
     });
 };
 
-const buildToken = (prefix) => `${prefix}-${randomUUID()}`;
+const buildToken = (prefix, isLunch = false) => {
+    const id = randomUUID().split('-')[0]; // 8-char hex
+    if (isLunch) {
+        return prefix === 'CS' ? `CSL-${id}` : `NCSL-${id}`;
+    }
+    if (prefix === 'CS') return `CS--${id}`;
+    if (prefix === 'NCS') return `NCS--${id}`;
+    return `${prefix}-${id}`;
+};
 
-const isValidToken = (token) => TOKEN_REGEX.test(normalizeValue(token));
+const isValidToken = (token) => {
+    const val = normalizeValue(token);
+    // Support both new and old formats during transition if needed, 
+    // but prioritized the new ones.
+    return TOKEN_REGEX.test(val) || /^[A-Z0-9-]+-[0-9a-f-]{8,}$/i.test(val);
+};
 
 const getRowByIndex = async (spreadsheetId, rowIndex, headers, sheetTitle) => {
     const lastColumn = indexToColumn(Math.max(headers.length - 1, 0));
@@ -582,7 +595,7 @@ const findRowByToken = async (spreadsheetId, token) => {
     const cachedMetadata = metadataCache.get(spreadsheetId);
     const sheetTitle = cachedMetadata?.sheetTitle || 'Form Responses 1';
 
-    const tokenCol = getColumnLetterByAlias(headers, headerMap, 'token');
+    const tokenColIdx = getColumnByAlias(headerMap, 'token');
     const lastColumn = indexToColumn(Math.max(headers.length - 1, 0));
     const range = `'${sheetTitle}'!A2:${lastColumn}`; // Fetch everything at once to find row + data
 
@@ -597,28 +610,23 @@ const findRowByToken = async (spreadsheetId, token) => {
 
     for (let i = 0; i < values.length; i += 1) {
         const row = values[i];
-        const cellValue = normalizeValue(row[tokenIdx]); // tokenIdx is from headerMap
-        if (cellValue && cellValue === normalizedToken) {
-            return { rowIndex: i + 2, headers, headerMap, sheetTitle, row };
+        if (tokenColIdx !== -1) {
+            const cellValue = normalizeValue(row[tokenColIdx]);
+            if (cellValue && cellValue === normalizedToken) {
+                return { rowIndex: i + 2, headers, headerMap, sheetTitle, row };
+            }
         }
     }
 
     // fallback: check Token_2 column if searching for a lunch token
-    if (normalizedToken.startsWith('LUNCH-')) {
-        const token2Col = getColumnLetterByAlias(headers, headerMap, 'token2');
-        if (token2Col && token2Col !== tokenCol) {
-            const range2 = `'${sheetTitle}'!${token2Col}2:${token2Col}`;
-            const response2 = await callWithRetry(() =>
-                sheets.spreadsheets.values.get({
-                    spreadsheetId,
-                    range: range2,
-                })
-            );
-            const values2 = response2.data.values || [];
-            for (let i = 0; i < values2.length; i += 1) {
-                const cellValue = normalizeValue(values2[i][0]);
+    const upToken = normalizedToken.toUpperCase();
+    if (upToken.startsWith('LUNCH-') || upToken.startsWith('CSL-')) {
+        const token2Idx = getColumnByAlias(headerMap, 'token2');
+        if (token2Idx !== -1) {
+            for (let i = 0; i < values.length; i += 1) {
+                const cellValue = normalizeValue(values[i][token2Idx]);
                 if (cellValue && cellValue === normalizedToken) {
-                    return { rowIndex: i + 2, headers, headerMap, sheetTitle };
+                    return { rowIndex: i + 2, headers, headerMap, sheetTitle, row: values[i] };
                 }
             }
         }
@@ -655,13 +663,21 @@ const markLunchPresent = async (spreadsheetId, rowIndex, headers, headerMap, she
     }
 };
 
-const handleScan = async (token) => {
+const handleScan = async (token, secret) => {
+    // 1. Authorization check
+    if (secret !== eventConfig.scannerSecret) {
+        console.warn(`[Scan API] ⚠️ Unauthorized scan attempt with token: ${token}`);
+        const error = new Error('Unauthorized scanner. Please use the official Texperia app.');
+        error.statusCode = 403;
+        throw error;
+    }
+
     const normalizedToken = normalizeValue(token);
 
     // If a lunch token is scanned at the attendance endpoint, redirect it
-    if (normalizedToken.toUpperCase().startsWith('LUNCH-')) {
+    if (normalizedToken.toUpperCase().startsWith('LUNCH-') || normalizedToken.toUpperCase().startsWith('CSL-')) {
         console.log(`[Scan Redirection] 🔄 Redirecting lunch token ${normalizedToken} to handleLunchScan`);
-        return await handleLunchScan(token);
+        return await handleLunchScan(token, secret);
     }
 
     if (!isValidToken(normalizedToken)) {
@@ -737,8 +753,7 @@ const handleScan = async (token) => {
         (async () => {
             try {
                 // 1. Generate unique LUNCH token (separate from attendance token)
-                const { randomUUID } = require('crypto');
-                const lunchToken = `LUNCH-${randomUUID()}`;
+                const lunchToken = buildToken(senderType, true);
                 console.log(`[Lunch] Token Generated: ${lunchToken}`);
 
                 // 2. Generate lunch QR pointing to /lunch endpoint
@@ -851,11 +866,34 @@ const handleScan = async (token) => {
         }
     }
 
-    return { message: 'Marked status', rowIndex, senderType };
+    return {
+        message: 'Marked attendance',
+        rowIndex,
+        senderType,
+        scanType: 'attendance',
+        status: 'success'
+    };
 };
 
-const handleLunchScan = async (token) => {
+const handleLunchScan = async (token, secret) => {
+    // 1. Authorization check
+    if (secret !== eventConfig.scannerSecret) {
+        console.warn(`[Lunch API] ⚠️ Unauthorized scan attempt with token: ${token}`);
+        const error = new Error('Unauthorized scanner. Please use the official Texperia app.');
+        error.statusCode = 403;
+        throw error;
+    }
+
     const normalizedToken = normalizeValue(token);
+    const upToken = normalizedToken.toUpperCase();
+
+    // Enforce lunch-only prefixes at this endpoint
+    const isLunchPrefix = upToken.startsWith('LUNCH-') || upToken.startsWith('CSL-') || upToken.startsWith('NCSL-');
+    if (!isLunchPrefix) {
+        const error = new Error('This QR is for attendance, not lunch.');
+        error.statusCode = 400;
+        throw error;
+    }
 
     if (!isValidToken(normalizedToken)) {
         const error = new Error('Invalid token format');
@@ -921,7 +959,13 @@ const handleLunchScan = async (token) => {
         }
     });
 
-    return { message: 'lunch token marked', rowIndex, senderType: resolvedSenderType };
+    return {
+        message: 'Marked lunch',
+        rowIndex,
+        senderType: resolvedSenderType,
+        scanType: 'lunch',
+        status: 'success'
+    };
 };
 
 module.exports = {

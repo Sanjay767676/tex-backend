@@ -1,5 +1,6 @@
 {
     "eventName": "Texperia 2026",
+    "scannerSecret": "TEX-2026-SECURE",
     "venue": "",
     "lunchVenue": "N/A",
     "scanCacheEnabled": true,
