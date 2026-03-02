@@ -103,6 +103,8 @@ const columnAliases = {
         'day1',
         'day_1',
         'first day',
+        'Event 1',
+        'Technical 1',
     ],
 
     // Day 2 event markers (for event extraction)
@@ -113,6 +115,8 @@ const columnAliases = {
         'second day',
         'Day 2 - Technical',
         'Day 2 - Non-Technical',
+        'Event 2',
+        'Technical 2',
     ],
 
     // Department column variations
@@ -128,16 +132,16 @@ const columnAliases = {
 
     // College column variations
     college: [
+        'College Name :',
+        'College Name',
+        'NAME OF COLLEGE :',
+        'NAME OF COLLEGE',
+        'NAME OF THE COLLEGE :',
+        'NAME OF THE COLLEGE',
         'College :',
         'Name of the College :',
         'Name of the College',
-        'NAME OF THE COLLEGE',
-        '1.NAME OF THE COLLEGE',
-        '2.NAME OF THE COLLEGE',
-        '3.NAME OF THE COLLEGE',
-        'College Name',
         'College',
-        'Name of the College',
         'Institute',
         'Institution Name',
         'College/Institute',

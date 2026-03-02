@@ -174,4 +174,5 @@ const generateLunchPass = async (data) =>
 module.exports = {
     generateRegistrationPass,
     generateLunchPass,
+    cleanCollegeName,
 };

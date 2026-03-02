@@ -13,7 +13,7 @@ const normalizeValue = (value) => (value ? String(value).trim() : '');
  */
 const getColumnByAlias = (headerMap, aliasKey) => {
     const aliases = columnAliases[aliasKey];
-    
+
     if (!aliases || !Array.isArray(aliases)) {
         console.error(`[Column Resolver] Unknown alias key: "${aliasKey}"`);
         return -1;
@@ -71,7 +71,7 @@ const buildHeaderMap = (headers) => {
  */
 const validateRequiredColumns = (headers, headerMap, requiredAliases) => {
     const missing = [];
-    
+
     for (const aliasKey of requiredAliases) {
         const index = getColumnByAlias(headerMap, aliasKey);
         if (index === -1) {
@@ -100,7 +100,12 @@ const getColumnLetterByAlias = (headers, headerMap, aliasKey) => {
  */
 const getDayType = (headerText) => {
     const normalized = normalizeValue(headerText).toLowerCase();
-    
+
+    // Explicit exclusion for structural/grouping headers
+    if (normalized.includes('list of departments') || normalized.includes('departments')) {
+        return null;
+    }
+
     const day1Patterns = columnAliases.day1 || [];
     const day2Patterns = columnAliases.day2 || [];
 
