@@ -284,6 +284,35 @@ const parseRows = (rows, spreadsheetId, sheetTitle) => {
     }).filter(item => item !== null);
 };
 
+const isSelectedEventValue = (value) => {
+    const normalized = normalizeValue(value).toLowerCase();
+    if (!normalized) return false;
+
+    // Exclude common negative / placeholder values from forms/sheets
+    const negativeValues = new Set(['no', 'n', 'false', '0', 'na', 'n/a', '-', '--']);
+    return !negativeValues.has(normalized);
+};
+
+const isAffirmativeMarker = (value) => {
+    const normalized = normalizeValue(value).toLowerCase();
+    return ['yes', 'y', 'true', '1', 'selected', 'checked'].includes(normalized);
+};
+
+const splitEventNamesFromCell = (value) => {
+    return normalizeValue(value)
+        .split(/,|\n|\|/)
+        .map(item => normalizeValue(item))
+        .filter(Boolean);
+};
+
+const pushUniqueEvent = (list, eventName) => {
+    const normalized = normalizeValue(eventName);
+    if (!normalized) return;
+
+    const exists = list.some(item => normalizeValue(item).toLowerCase() === normalized.toLowerCase());
+    if (!exists) list.push(normalized);
+};
+
 /**
  * Core function to find pending payments across tabs
  */
@@ -351,15 +380,30 @@ const extractEvents = (row, headers) => {
     headers.forEach((header, index) => {
         if (index >= row.length) return;
 
+        const headerText = normalizeValue(header);
         const cellValue = normalizeValue(row[index]);
-        if (!cellValue) return;
+        if (!isSelectedEventValue(cellValue)) return;
 
-        const dayType = getDayType(header);
-        if (dayType === 'day1') {
-            day1Events.push(header); // Push the event name (header)
-        } else if (dayType === 'day2') {
-            day2Events.push(header); // Push the event name (header)
+        const dayType = getDayType(headerText);
+        if (!dayType) return;
+
+        const targetList = dayType === 'day1' ? day1Events : day2Events;
+
+        // Case 1: checkbox-style sheets => header is event name, cell is YES/TRUE/1
+        if (isAffirmativeMarker(cellValue)) {
+            pushUniqueEvent(targetList, headerText);
+            return;
         }
+
+        // Case 2: dropdown/multiselect sheets => cell stores event names directly
+        const parsedEvents = splitEventNamesFromCell(cellValue);
+        if (parsedEvents.length > 0) {
+            parsedEvents.forEach((eventName) => pushUniqueEvent(targetList, eventName));
+            return;
+        }
+
+        // Fallback
+        pushUniqueEvent(targetList, headerText);
     });
 
     return { day1Events, day2Events };

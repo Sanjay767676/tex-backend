@@ -30,6 +30,42 @@ const cleanCollegeName = (name) => {
     return name.replace(/^[0-9]\.\s*/, '').replace(/:\s*$/, '').trim();
 };
 
+const sanitizeEventsList = (eventsList) => {
+    if (!Array.isArray(eventsList)) return [];
+
+    const blockedPatterns = [
+        'gender',
+        'phone',
+        'district',
+        'state',
+        'year of study',
+        'upi transaction',
+        'email',
+        'college',
+        'department',
+        'name',
+    ];
+
+    const seen = new Set();
+    const cleaned = [];
+
+    for (const event of eventsList) {
+        const text = String(event || '').trim();
+        if (!text) continue;
+
+        const normalized = text.toLowerCase();
+        const isBlocked = blockedPatterns.some((pattern) => normalized.includes(pattern));
+        if (isBlocked) continue;
+
+        if (!seen.has(normalized)) {
+            seen.add(normalized);
+            cleaned.push(text);
+        }
+    }
+
+    return cleaned;
+};
+
 const docToBuffer = (doc) =>
     new Promise((resolve, reject) => {
         const chunks = [];
@@ -99,7 +135,8 @@ const buildPDF = async ({
     const detailY = 412;
     const detailX = 142;
     const formattedDay = day ? (day.includes('Day') ? day : `Day ${day}`) : 'N/A';
-    const eventsText = eventsList && eventsList.length > 0 ? eventsList.join('\n') : 'Texperia 2026';
+    const filteredEvents = sanitizeEventsList(eventsList);
+    const eventsText = filteredEvents.length > 0 ? filteredEvents.join('\n') : 'Texperia 2026';
 
     doc.font('Lora').fontSize(18).fillColor('#000000'); // Slightly smaller font
 
