@@ -3,6 +3,7 @@
  * Using pool:true for connection reuse.
  */
 const nodemailer = require('nodemailer');
+const performanceMonitor = require('../utils/performanceMonitor');
 const createTransporter = (user, pass) => {
     return nodemailer.createTransport({
         host: 'smtp.gmail.com',
@@ -246,11 +247,14 @@ const sendConfirmationEmail = async ({
     };
 
     try {
+        const emailStartTime = Date.now();
         console.log('[Email Service] Sending registration pass to: ' + to);
         console.log('[Email Service] Using sender: ' + fromName + ' <' + fromEmail + '>');
 
         const info = await transporter.sendMail(mailOptions);
-        console.log('[Email Service] Registration email sent successfully');
+        const duration = performanceMonitor.endTimer('emailSending', emailStartTime);
+        
+        console.log('[Email Service] Registration email sent successfully in ' + duration + 'ms');
         console.log('[Email Service] Message ID: ' + info.messageId);
         console.log('[Email Service] Response: ' + info.response);
 

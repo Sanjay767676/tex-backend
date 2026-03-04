@@ -2,6 +2,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
 const { handleScan, handleLunchScan } = require('../services/sheetsService');
+const performanceMonitor = require('../utils/performanceMonitor');
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ const scanLimiter = rateLimit({
 });
 
 router.post('/scan', scanLimiter, async (req, res) => {
+    const scanStartTime = Date.now();
     const token = req.body && req.body.token ? String(req.body.token).trim() : '';
     const secret = req.headers['x-scanner-secret'] || req.query.secret || '';
 
@@ -37,12 +39,18 @@ router.post('/scan', scanLimiter, async (req, res) => {
 
     try {
         const result = await handleScan(token, secret);
+        const duration = performanceMonitor.endTimer('scanner', scanStartTime);
+        console.log(`[Scan API] Scan completed in ${duration}ms`);
+        
         return res.json({
             status: 'ok',
             message: 'Attendance marked successfully',
-            data: result
+            data: result,
+            processingTime: duration + 'ms'
         });
     } catch (error) {
+        const duration = Date.now() - scanStartTime;
+        console.log(`[Scan API] Scan failed in ${duration}ms`);
         const statusCode = error.statusCode || 500;
         return res.status(statusCode).json({
             status: "error",

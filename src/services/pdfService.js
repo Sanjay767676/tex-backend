@@ -1,6 +1,7 @@
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+const performanceMonitor = require('../utils/performanceMonitor');
 
 const assetsPath = path.join(__dirname, '..', '..', 'assets', 'images');
 const imageCache = new Map();
@@ -148,10 +149,11 @@ const generateRegistrationPass = async ({
     qrBase64,
     venue,
 }, type = 'attendance') => {
+    const pdfStartTime = Date.now();
     const title = type === 'lunch' ? 'Lunch Token' : 'Registration Pass';
     const extraRows = [];
 
-    return buildPDF({
+    const result = await buildPDF({
         title,
         studentName,
         studentEmail,
@@ -163,6 +165,11 @@ const generateRegistrationPass = async ({
         token,
         extraRows,
     });
+    
+    const duration = performanceMonitor.endTimer('pdfGeneration', pdfStartTime);
+    console.log(`[PDF Service] ⏱️ ${title} generated in ${duration}ms`);
+    
+    return result;
 };
 
 /**

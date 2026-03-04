@@ -3,6 +3,7 @@ const router = express.Router();
 const { generateRegistrationPass, generateLunchPass } = require('../services/pdfService');
 const cacheService = require('../services/cacheService');
 const { env } = require('../config/env');
+const performanceMonitor = require('../utils/performanceMonitor');
 
 // Enhanced health check route
 router.get('/health', function (req, res) {
@@ -144,6 +145,108 @@ router.get('/debug/cache', function (req, res) {
         res.status(500).json({
             status: 'error',
             message: 'Cache debug failed',
+            error: error.message
+        });
+    }
+});
+
+// Performance monitoring route - GET /debug/performance
+router.get('/debug/performance', function (req, res) {
+    try {
+        var stats = performanceMonitor.getStats();
+        
+        var summary = {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            performance: stats,
+            insights: {
+                googleAPI: {
+                    status: stats.googleAPI.quotaErrors > 0 ? 'WARNING: Quota errors detected' : 'OK',
+                    efficiency: stats.googleAPI.retries > 0 
+                        ? Math.round((1 - (stats.googleAPI.retries / stats.googleAPI.totalCalls)) * 100) + '% success rate'
+                        : '100% success rate',
+                    recommendation: stats.googleAPI.averageTime > 500 
+                        ? 'API calls are slow (avg ' + stats.googleAPI.averageTime + 'ms). Consider caching more aggressively.'
+                        : 'API performance is good (avg ' + stats.googleAPI.averageTime + 'ms)'
+                },
+                pdfGeneration: {
+                    status: stats.pdfGeneration.averageTime > 2000 ? 'SLOW' : 'OK',
+                    recommendation: stats.pdfGeneration.averageTime > 2000 
+                        ? 'PDF generation is slow (avg ' + stats.pdfGeneration.averageTime + 'ms). Consider optimizing images or fonts.'
+                        : 'PDF generation is fast (avg ' + stats.pdfGeneration.averageTime + 'ms)'
+                },
+                emailSending: {
+                    status: stats.emailSending.averageTime > 5000 ? 'SLOW' : 'OK',
+                    recommendation: stats.emailSending.averageTime > 5000 
+                        ? 'Email sending is slow (avg ' + stats.emailSending.averageTime + 'ms). Check SMTP connection pool settings.'
+                        : 'Email sending is fast (avg ' + stats.emailSending.averageTime + 'ms)'
+                },
+                scanner: {
+                    status: stats.scanner.averageTime > 1000 ? 'SLOW' : 'OK',
+                    recommendation: stats.scanner.averageTime > 1000 
+                        ? 'Scanner is slow (avg ' + stats.scanner.averageTime + 'ms). Check cache hit rate and database queries.'
+                        : 'Scanner is fast (avg ' + stats.scanner.averageTime + 'ms)'
+                }
+            },
+            actions: {
+                reset: '/debug/performance/reset',
+                report: '/debug/performance/report'
+            }
+        };
+
+        console.log('[Performance] Stats requested - API calls: ' + stats.googleAPI.totalCalls + 
+                    ', PDFs: ' + stats.pdfGeneration.totalCalls + 
+                    ', Emails: ' + stats.emailSending.totalCalls + 
+                    ', Scans: ' + stats.scanner.totalCalls);
+
+        res.json(summary);
+    } catch (error) {
+        console.error('[Performance] Error:', error.message);
+        res.status(500).json({
+            status: 'error',
+            message: 'Performance stats failed',
+            error: error.message
+        });
+    }
+});
+
+// Performance report - GET /debug/performance/report
+router.get('/debug/performance/report', function (req, res) {
+    try {
+        // Generate console report
+        var stats = performanceMonitor.getReport();
+        
+        res.json({
+            status: 'ok',
+            message: 'Performance report logged to console',
+            stats: stats,
+            note: 'Check server console for detailed formatted report'
+        });
+    } catch (error) {
+        console.error('[Performance Report] Error:', error.message);
+        res.status(500).json({
+            status: 'error',
+            message: 'Performance report failed',
+            error: error.message
+        });
+    }
+});
+
+// Reset performance stats - POST /debug/performance/reset
+router.post('/debug/performance/reset', function (req, res) {
+    try {
+        performanceMonitor.reset();
+        
+        res.json({
+            status: 'ok',
+            message: 'Performance metrics reset successfully',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('[Performance Reset] Error:', error.message);
+        res.status(500).json({
+            status: 'error',
+            message: 'Performance reset failed',
             error: error.message
         });
     }

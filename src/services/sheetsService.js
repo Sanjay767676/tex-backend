@@ -16,6 +16,7 @@ const {
     getDayType,
 } = require('../utils/columnResolver');
 const eventConfig = require('../config/eventConfig.json');
+const performanceMonitor = require('../utils/performanceMonitor');
 
 const SHEET_NAME = 'A:ZZ';
 
@@ -68,11 +69,17 @@ const throttle = async () => {
  * Retries on 429 (rate limit) and 503 (service unavailable / quota).
  */
 const callWithRetry = async (fn, maxRetries = 8) => {
+    const apiStartTime = Date.now();
     let attempt = 0;
+    let isQuotaError = false;
+    
     while (true) {
         await throttle();
         try {
-            return await fn();
+            const result = await fn();
+            const duration = Date.now() - apiStartTime;
+            performanceMonitor.recordAPICall(duration, attempt > 0, isQuotaError);
+            return result;
         } catch (err) {
             const code = err?.code || err?.response?.status;
             const isRetryable =
@@ -81,8 +88,16 @@ const callWithRetry = async (fn, maxRetries = 8) => {
                 (err.message && err.message.includes('Quota exceeded')) ||
                 (err.message && err.message.includes('Rate Limit'));
 
+            if (code === 429 || (err.message && err.message.includes('Quota'))) {
+                isQuotaError = true;
+            }
+
             attempt++;
-            if (!isRetryable || attempt > maxRetries) throw err;
+            if (!isRetryable || attempt > maxRetries) {
+                const duration = Date.now() - apiStartTime;
+                performanceMonitor.recordAPICall(duration, true, isQuotaError);
+                throw err;
+            }
 
             const backoff = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
             const jitter = Math.floor(Math.random() * 1000);
@@ -449,11 +464,14 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             }
 
             // Generate token and QR data
+            const tokenGenStart = Date.now();
             const token = buildToken(senderType);
             const { qrBase64, scanUrl } = await generateQRCode(token);
             const { day1Events, day2Events } = extractEvents(latestRow, headers);
 
             console.log(`[Payment Processing] ✅ Token generated: ${token}`);
+            const tokenGenEnd = Date.now();
+            performanceMonitor.endTimer('tokenGeneration', tokenGenStart);
 
             // Student information
             const studentName = nameIdx !== -1 ? normalizeValue(latestRow[nameIdx]) || 'Student' : 'Student';
@@ -471,11 +489,36 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             await updateRowColumns(spreadsheetId, payment.rowIndex, updates, headers, headerMap, sheetTitle);
             console.log(`[Payment Processing] 💾 Token written to sheet for row ${payment.rowIndex}`);
 
-            // Determine registration day
+            // Determine registration day - check explicit Day column first
             let dayText = 'N/A';
-            if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
-            else if (day1Events.length > 0) dayText = 'Day 1';
-            else if (day2Events.length > 0) dayText = 'Day 2';
+            const dayIdx = getColumnByAlias(headerMap, 'registrationDay');
+            if (dayIdx !== -1 && latestRow[dayIdx]) {
+                // Use explicit day column if available
+                const dayValue = normalizeValue(latestRow[dayIdx]);
+                if (dayValue) {
+                    // Extract day from formats like "Day 1  - 12.03.2026" or "Day 2  - 13.03.2026"
+                    if (dayValue.toLowerCase().includes('day 1')) {
+                        dayText = 'Day 1';
+                    } else if (dayValue.toLowerCase().includes('day 2')) {
+                        dayText = 'Day 2';
+                    } else if (dayValue.toLowerCase().includes('both')) {
+                        dayText = 'Both Days';
+                    } else if (dayValue.includes('1') && !dayValue.includes('2')) {
+                        dayText = 'Day 1';
+                    } else if (dayValue.includes('2') && !dayValue.includes('1')) {
+                        dayText = 'Day 2';
+                    } else if (dayValue.includes('1') && dayValue.includes('2')) {
+                        dayText = 'Both Days';
+                    }
+                }
+            }
+            
+            // Fallback: infer from events if no explicit day column
+            if (dayText === 'N/A') {
+                if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
+                else if (day1Events.length > 0) dayText = 'Day 1';
+                else if (day2Events.length > 0) dayText = 'Day 2';
+            }
 
             // Generate PDF Buffer
             console.log(`[Payment Processor] 📄 Generating PDF for ${studentName}...`);
@@ -847,11 +890,36 @@ const handleScan = async (token, secret) => {
                 const venueMap = eventConfig.eventVenues || {};
                 let resolvedVenue = eventConfig.lunchVenue || 'N/A';
 
-                // Determine registration day
+                // Determine registration day - check explicit Day column first
                 let dayText = 'N/A';
-                if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
-                else if (day1Events.length > 0) dayText = 'Day 1';
-                else if (day2Events.length > 0) dayText = 'Day 2';
+                const dayIdx = getColumnByAlias(headerMap, 'registrationDay');
+                if (dayIdx !== -1 && row[dayIdx]) {
+                    // Use explicit day column if available
+                    const dayValue = normalizeValue(row[dayIdx]);
+                    if (dayValue) {
+                        // Extract day from formats like "Day 1  - 12.03.2026" or "Day 2  - 13.03.2026"
+                        if (dayValue.toLowerCase().includes('day 1')) {
+                            dayText = 'Day 1';
+                        } else if (dayValue.toLowerCase().includes('day 2')) {
+                            dayText = 'Day 2';
+                        } else if (dayValue.toLowerCase().includes('both')) {
+                            dayText = 'Both Days';
+                        } else if (dayValue.includes('1') && !dayValue.includes('2')) {
+                            dayText = 'Day 1';
+                        } else if (dayValue.includes('2') && !dayValue.includes('1')) {
+                            dayText = 'Day 2';
+                        } else if (dayValue.includes('1') && dayValue.includes('2')) {
+                            dayText = 'Both Days';
+                        }
+                    }
+                }
+
+                // Fallback: infer from events if no explicit day column
+                if (dayText === 'N/A') {
+                    if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
+                    else if (day1Events.length > 0) dayText = 'Day 1';
+                    else if (day2Events.length > 0) dayText = 'Day 2';
+                }
 
                 // If the student has specific events, try to find a matching venue
                 for (const event of allEvents) {

@@ -97,6 +97,19 @@ const columnAliases = {
         'Scan Link',
     ],
 
+    // Registration Day column (explicit day selection)
+    registrationDay: [
+        'Event Happening Days :',
+        'Event Happening Days',
+        'Day :',
+        'Day',
+        'Registration Day',
+        'Which Day?',
+        'Select Day',
+        'Day of Registration',
+        'Attending Day',
+    ],
+
     // Day 1 event markers (for event extraction)
     day1: [
         'day 1',
