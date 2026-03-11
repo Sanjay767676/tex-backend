@@ -450,9 +450,51 @@ const sendAttendanceConfirmedWithLunchEmail = async ({
     }
 };
 
+const sendSimpleAttendanceConfirmationEmail = async ({
+    senderType,
+    to,
+    name,
+    dayText
+}) => {
+    const transporter = await getTransporter(senderType);
+    const fromName = senderType === 'NCS' ? 'Texperia NCS Team' : 'Texperia CS Team';
+    const fromEmail = senderType === 'NCS' ? process.env.NCS_EMAIL_USER : process.env.CS_EMAIL_USER;
+
+    const emailTemplate = renderEmailTemplate({
+        title: 'Attendance Confirmed',
+        greeting: 'Hello ' + name + '!',
+        message: `Your Texperia ${dayText} attendance is confirmed. We look forward to your participation!`,
+    });
+
+    const mailOptions = {
+        from: '"' + fromName + '" <' + fromEmail + '>',
+        to,
+        replyTo: fromEmail,
+        subject: `Texperia 2026 - ${dayText} Attendance Confirmed`,
+        html: emailTemplate.html,
+        text: emailTemplate.text,
+        headers: {
+            'X-Priority': '3',
+            'X-Mailer': 'Texperia Event System',
+            'Organization': 'SNS College of Technology',
+        }
+    };
+
+    try {
+        console.log(`[Email Service] Sending simple attendance confirmation for ${dayText} to: ${to}`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('[Email Service] Simple attendance email sent: ' + info.response);
+        return true;
+    } catch (error) {
+        console.error('[Email Service] Simple attendance email error:', error.message);
+        return false;
+    }
+};
+
 module.exports = {
     sendConfirmationEmail,
     sendAttendanceEmail,
     sendLunchEmail,
     sendAttendanceConfirmedWithLunchEmail,
+    sendSimpleAttendanceConfirmationEmail,
 };

@@ -4,7 +4,7 @@ const { randomUUID } = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const QRCode = require('qrcode');
-const { sendConfirmationEmail, sendAttendanceEmail, sendLunchEmail } = require('./emailService');
+const { sendConfirmationEmail, sendAttendanceEmail, sendLunchEmail, sendSimpleAttendanceConfirmationEmail } = require('./emailService');
 const { generateRegistrationPass, generateLunchPass } = require('./pdfService');
 const {
     normalizeValue,
@@ -869,138 +869,43 @@ const handleScan = async (token, secret) => {
         const collegeIdx = getColumnByAlias(headerMap, 'college');
         const college = collegeIdx === -1 ? 'N/A' : normalizeValue(row[collegeIdx]) || 'N/A';
 
-        // Run the email + lunch token generation async in background
+        // Simple background task: resolve Day and send confirmation email
         (async () => {
             try {
-                // 1. Generate unique LUNCH token (separate from attendance token)
-                const lunchToken = buildToken(senderType, true);
-                console.log(`[Lunch] Token Generated: ${lunchToken}`);
-
-                // 2. Generate lunch QR pointing to /lunch endpoint
-                const { qrBase64: lunchQrBase64, scanUrl: lunchScanUrl } = await generateQRCode(lunchToken, 'lunch');
-
-                // 3. Write Token_2 + Lunch_QR_Link + Lunch_Status using aliases
-                const googleSheets = require('../config/googleSheets');
-                const token2Idx = getColumnByAlias(headerMap, 'token2');
-                const lunchQrLinkIdx = getColumnByAlias(headerMap, 'lunchLink');
-                const lunchStatusIdx = getColumnByAlias(headerMap, 'lunch');
-
-                const sheetUpdates = [];
-                if (token2Idx !== -1) {
-                    const colLetter = indexToColumn(token2Idx);
-                    sheetUpdates.push({
-                        range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
-                        values: [[lunchToken]],
-                    });
-                }
-                if (lunchQrLinkIdx !== -1) {
-                    const colLetter = indexToColumn(lunchQrLinkIdx);
-                    sheetUpdates.push({
-                        range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
-                        values: [[lunchScanUrl]],
-                    });
-                }
-                if (lunchStatusIdx !== -1) {
-                    const colLetter = indexToColumn(lunchStatusIdx);
-                    sheetUpdates.push({
-                        range: `'${sheetTitle}'!${colLetter}${rowIndex}`,
-                        values: [['PENDING']],
-                    });
-                }
-                if (sheetUpdates.length > 0) {
-                    await callWithRetry(() =>
-                        googleSheets.spreadsheets.values.batchUpdate({
-                            spreadsheetId,
-                            requestBody: { valueInputOption: 'USER_ENTERED', data: sheetUpdates },
-                        })
-                    );
-                    console.log(`[Lunch] Sheet Updated with Token_2 for row ${rowIndex}`);
-                }
-
-                // Cache the lunch token so it resolves on scan
-                await cacheService.set(lunchToken, {
-                    spreadsheetId,
-                    rowIndex,
-                    headers,
-                    headerMap,
-                    sheetTitle,
-                    row,
-                    attendance: true,
-                    lunch: false,
-                    senderType,
-                });
-
-                // 4. Resolve Venue and Day by Event Name
-                const venueMap = eventConfig.eventVenues || {};
-                let resolvedVenue = eventConfig.lunchVenue || 'N/A';
-
                 // Determine registration day - check explicit Day column first
                 let dayText = 'N/A';
                 const dayIdx = getColumnByAlias(headerMap, 'registrationDay');
                 if (dayIdx !== -1 && row[dayIdx]) {
-                    // Use explicit day column if available
                     const dayValue = normalizeValue(row[dayIdx]);
                     if (dayValue) {
-                        // Extract day from formats like "Day 1  - 12.03.2026" or "Day 2  - 13.03.2026"
-                        if (dayValue.toLowerCase().includes('day 1')) {
-                            dayText = 'Day 1';
-                        } else if (dayValue.toLowerCase().includes('day 2')) {
-                            dayText = 'Day 2';
-                        } else if (dayValue.toLowerCase().includes('both')) {
-                            dayText = 'Both Days';
-                        } else if (dayValue.includes('1') && !dayValue.includes('2')) {
-                            dayText = 'Day 1';
-                        } else if (dayValue.includes('2') && !dayValue.includes('1')) {
-                            dayText = 'Day 2';
-                        } else if (dayValue.includes('1') && dayValue.includes('2')) {
-                            dayText = 'Both Days';
-                        }
+                        if (dayValue.toLowerCase().includes('day 1')) dayText = 'Day 1';
+                        else if (dayValue.toLowerCase().includes('day 2')) dayText = 'Day 2';
+                        else if (dayValue.toLowerCase().includes('both')) dayText = 'Both Days';
+                        else if (dayValue.includes('1') && !dayValue.includes('2')) dayText = 'Day 1';
+                        else if (dayValue.includes('2') && !dayValue.includes('1')) dayText = 'Day 2';
+                        else if (dayValue.includes('1') && dayValue.includes('2')) dayText = 'Both Days';
                     }
                 }
 
                 // Fallback: infer from events if no explicit day column
                 if (dayText === 'N/A') {
+                    const { day1Events, day2Events } = extractEvents(row, headers);
                     if (day1Events.length > 0 && day2Events.length > 0) dayText = 'Both Days';
                     else if (day1Events.length > 0) dayText = 'Day 1';
                     else if (day2Events.length > 0) dayText = 'Day 2';
                 }
 
-                // If the student has specific events, try to find a matching venue
-                for (const event of allEvents) {
-                    if (venueMap[event]) {
-                        resolvedVenue = venueMap[event];
-                        break;
-                    }
-                }
-
-                // 5. Generate lunch PDF
-                const { generateLunchPass } = require('./pdfService');
-                const lunchPdfBuffer = await generateLunchPass({
-                    studentName,
-                    studentEmail,
-                    college,
-                    department: 'N/A',
-                    day: dayText,
-                    eventsList: allEvents,
-                    token: lunchToken,
-                    qrBase64: lunchQrBase64,
-                    venue: resolvedVenue,
-                });
-                console.log(`[Lunch] PDF Created for ${studentName}`);
-
-                // 5. Send consolidated Attendance Confirmation + Lunch Token email
-                const { sendAttendanceConfirmedWithLunchEmail } = require('./emailService');
-                await sendAttendanceConfirmedWithLunchEmail({
+                console.log(`[Scan Process] Sending simple confirmation for ${dayText} to ${studentEmail}`);
+                await sendSimpleAttendanceConfirmationEmail({
                     senderType,
                     to: studentEmail,
                     name: studentName,
-                    token: lunchToken,
-                    pdfBuffer: lunchPdfBuffer,
+                    dayText: dayText
                 });
-                console.log(`[Workflow] ✅ Attendance confirmed & Lunch token sent to ${studentEmail}`);
+                console.log(`[Workflow] ✅ Attendance confirmed for ${studentName} (${dayText})`);
 
             } catch (err) {
-                console.error(`[Scan Process] ❌ Consolidated flow failed for ${studentEmail}:`, err.message);
+                console.error(`[Scan Process] ❌ Simple confirmation flow failed for ${studentEmail}:`, err.message);
             }
         })();
 
